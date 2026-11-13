@@ -237,19 +237,28 @@ export function PreferencesPanel({ response, loading, error, onRetry, onUseBasic
                     <span className="text-slate-900">{hp.preference}</span>
                     {hp.reason && <span className="block text-xs text-slate-500">{hp.reason}</span>}
                   </span>
+                  <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-slate-600" title="Exclude products that don’t meet this (or whose listing doesn’t show it)">
+                    <input
+                      type="checkbox"
+                      checked={!!hp.mandatory}
+                      onChange={(e) => update({ hardware_preferences: draft.hardware_preferences.map((x) => (x.spec === hp.spec ? { ...x, mandatory: e.target.checked } : x)) })}
+                      className="h-3.5 w-3.5 rounded border-slate-300 accent-navy-900"
+                    />
+                    Must have
+                  </label>
                   <button type="button" onClick={() => update({ hardware_preferences: draft.hardware_preferences.filter((x) => x.spec !== hp.spec) })} className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label={`Remove ${specLabels[hp.spec]} suggestion`}>
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </li>
               ))}
             </ul>
-            <p className="mt-1.5 text-xs text-slate-400">General guidelines suggested by AI — not verified requirements or specs of any product. They rank results only where listings include that spec.</p>
+            <p className="mt-1.5 text-xs text-slate-400">General guidelines suggested by AI — not verified requirements or specs of any product. Tick “Must have” to exclude products that don’t meet one; otherwise they’re shown as strengths or weaknesses.</p>
           </div>
         )}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/60 px-5 py-3.5">
-        <p className="text-xs text-slate-500">Category, budget and brands filter results; priorities and suggestions rank them.</p>
+        <p className="text-xs text-slate-500">Category, budget, brands and must-haves filter results; uses and priorities adjust the scoring weights.</p>
         <div className="flex items-center gap-2">
           {edited && (
             <button type="button" onClick={() => { setDraft(response.preferences); setEdited(false); setApplyError(null) }} className="btn-ghost py-2 text-xs">

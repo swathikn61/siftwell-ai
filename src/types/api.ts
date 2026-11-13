@@ -121,6 +121,8 @@ export interface HardwarePreference {
   spec: HardwareSpec
   preference: string
   reason: string
+  /** Set by the user: products that don't meet it are excluded */
+  mandatory?: boolean
 }
 
 export interface ShoppingPreferences {
@@ -158,41 +160,72 @@ export interface AIDiagnostics {
 }
 
 // ---------------------------------------------------------------------------
-// Preference-aware ranking (POST /api/recommendations)
+// Recommendation engine (POST /api/recommendations) — deterministic scoring
 // ---------------------------------------------------------------------------
-export interface RankingReason {
-  factor: string
-  effect: 'positive' | 'negative' | 'neutral' | 'unknown'
-  text: string
-}
-
-export interface RankingFactor {
-  key: string
-  label: string
-  /** priority = stated by the user · suggestion = AI hardware guideline */
-  source: 'priority' | 'suggestion'
-  kind: 'threshold' | 'relative' | 'feature'
-  description: string
-}
-
+export type Criterion = 'processor' | 'ram' | 'battery' | 'storage' | 'display' | 'value'
 export type RecommendationSort = 'match' | 'price_asc' | 'price_desc' | 'name'
 
 export interface RecommendationRequest {
   preferences: ShoppingPreferences
+  weights: Record<Criterion, number> | null
+  adjust_for_usage: boolean
   sort: RecommendationSort
   limit: number
   offset: number
 }
 
+export interface CriterionScore {
+  criterion: Criterion
+  label: string
+  /** 0–100, or null when the spec isn't listed or can't be compared */
+  score: number | null
+  weight: number
+  contribution: number | null
+  value: string | null
+  detail: string
+}
+
+export interface RequirementResult {
+  text: string
+  spec: string
+  mandatory: boolean
+  met: boolean | null
+  detail: string
+}
+
+export interface ScoredProduct {
+  rank: number
+  product: Product
+  score: number
+  coverage: number
+  breakdown: CriterionScore[]
+  strengths: string[]
+  weaknesses: string[]
+  requirements: RequirementResult[]
+  summary: string
+}
+
+export interface WeightSummary {
+  criterion: Criterion
+  label: string
+  base: number
+  multiplier: number
+  effective: number
+}
+
 export interface RecommendationResponse {
   preferences: ShoppingPreferences
-  items: { product: Product; score: number; reasons: RankingReason[] }[]
+  items: ScoredProduct[]
   total: number
   limit: number
   offset: number
-  ranking_factors: RankingFactor[]
-  not_used: { label: string; reason: string }[]
   sort: RecommendationSort
+  weights: WeightSummary[]
+  adjustments: { criterion: Criterion; factor: number; reason: string }[]
+  adjust_for_usage: boolean
+  excluded: { slug: string; name: string; price_inr: number; reasons: string[] }[]
+  unchecked_requirements: { text: string; reason: string }[]
+  scales: { category: string; criterion: string; scale: string }[]
   warnings: string[]
   method: string
 }

@@ -114,7 +114,7 @@ Use `include_demo=false` on list/search to hide demo products.
 | POST   | `/api/ai/preferences`           | AI preference extraction (Gemini)               |
 | POST   | `/api/ai/preferences/validate`  | Validate preferences edited by the user         |
 | GET    | `/api/ai/status`                | Is Gemini configured and reachable?             |
-| POST   | `/api/recommendations`          | Rank products against preferences, with reasons |
+| POST   | `/api/recommendations`          | Score (0–100) and rank products, with reasons   |
 | POST   | `/api/products/import`          | Import products from a CSV file                 |
 
 **Filters** (list and search): `category`, `brand` (repeat for several:
@@ -206,23 +206,40 @@ Restart the server, then check `GET /api/ai/status` — it should say `"availabl
 - `POST /api/ai/preferences/validate` validates preferences the user edited
   (Pydantic + catalogue check: unknown categories/brands are removed with a warning).
 
-## Preference-aware ranking
+## Recommendation engine
 
-`POST /api/recommendations` takes validated preferences, filters by category,
-budget and brands, then ranks with plain rules using only listed specs
-(`app/services/recommendation_service.py`):
+`POST /api/recommendations` scores and ranks products with **deterministic Python**
+(`app/services/scoring_engine.py`). Gemini only extracts preferences — it never
+calculates scores or rankings. The same input always gives the same result.
 
-- Guidelines with a number (“At least 16 GB”, “5,000 mAh or more”, “120 Hz”) are
-  checked as thresholds; “Dedicated graphics” is checked against the listed graphics.
-- Guidelines without a number and stated priorities (battery life, performance,
-  display, storage, value for money) compare products with the other results.
-- Each result lists why it ranked where it did (met / missed / not listed), and
-  `not_used` explains preferences that couldn't influence ranking (e.g. camera or
-  weight aren't listed; uses only count through the hardware guidelines).
-- AI hardware guidelines are treated as suggestions, never verified requirements.
-- The AI never returns product specifications — only the user's preferences.
+1. **Filter** (`recommendation_service.py`, PostgreSQL): category, budget, brands, then
+   *must-have* requirements (hardware guidelines the user ticked as “Must have”).
+   A product whose listing doesn’t show a must-have spec is excluded too, with the reason.
+2. **Score each criterion 0–100** on published reference scales per category
+   (returned in `scales`):
 
-Tests never call the real API: Gemini is mocked with `httpx.MockTransport`.
+   | Criterion | Laptops | Smartphones |
+   |---|---|---|
+   | Processor (cores × GHz, both must be listed) | 16–80 | 8–28 |
+   | RAM (log) | 4–32 GB | 4–16 GB |
+   | Storage (log) | 128–2,048 GB | 64–1,024 GB |
+   | Battery | 40–100 Wh | 3,000–6,000 mAh |
+   | Display (average of refresh rate and resolution, if listed) | 60–240 Hz; FHD–3840×2400 | 60–144 Hz; 720×1600–1440×3200 |
+   | Value for money | spec score per ₹1 lakh, compared across the matching products | same |
+
+3. **Weights**: defaults (processor 20, RAM 15, battery 15, storage 10, display 15,
+   value 25), or the user’s own `weights`, multiplied by usage/priority adjustments
+   (e.g. “Java development” → RAM ×1.5, processor ×1.3; “Battery life” → battery ×1.5;
+   capped at ×3), then normalised to 100%. Set `adjust_for_usage: false` to turn this off.
+4. **Total out of 100** = weighted average of the criteria that could be scored.
+   Missing specs are never guessed or counted as zero: they’re left out, their weight
+   is shared among the others, and `coverage` shows how much of the weight was scored.
+5. **Explanations**: every product returns a per-criterion `breakdown` (score, weight,
+   points contributed, how it was calculated), `strengths`, `weaknesses`, requirement
+   checks and a one-line `summary`. Ties are broken by coverage, then price, then name.
+
+Note: value for money is relative to the products that match, so changing filters or
+must-haves can change value scores (and therefore totals).
 
 ## Test with Swagger UI
 

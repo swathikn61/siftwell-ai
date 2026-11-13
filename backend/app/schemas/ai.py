@@ -37,6 +37,7 @@ class HardwarePreference(BaseModel):
     spec: SpecName
     preference: str = Field(min_length=1, max_length=80, examples=["At least 16 GB"])
     reason: str = Field(default="", max_length=140, examples=["Java IDEs and multitasking use a lot of memory"])
+    mandatory: bool = Field(default=False, description="Set by the user: products that don’t meet it are excluded")
 
     @field_validator("preference", "reason", mode="before")
     @classmethod
