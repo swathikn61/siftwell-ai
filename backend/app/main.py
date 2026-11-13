@@ -17,7 +17,7 @@ from app import __version__
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.database import SessionLocal, create_tables
-from app.routers import ai, categories, compare, health, products, recommendations
+from app.routers import ai, assistant, categories, compare, health, products, recommendations
 from app.services.category_service import ensure_default_categories
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
@@ -69,6 +69,7 @@ app.include_router(products.router)
 app.include_router(compare.router)
 app.include_router(ai.router)
 app.include_router(recommendations.router)
+app.include_router(assistant.router)
 
 
 @app.get("/", include_in_schema=False)

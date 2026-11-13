@@ -229,3 +229,28 @@ export interface RecommendationResponse {
   warnings: string[]
   method: string
 }
+
+// ---------------------------------------------------------------------------
+// AI Decision Assistant (POST /api/assistant/chat)
+// ---------------------------------------------------------------------------
+export interface AssistantContext {
+  product_slugs: string[]
+  preferences: ShoppingPreferences
+  weights: Record<Criterion, number> | null
+  adjust_for_usage: boolean
+}
+
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AssistantReply {
+  answer: string
+  cited_products: { slug: string; name: string }[]
+  unavailable: string[]
+  warnings: string[]
+  model: string
+  duration_ms: number
+  products_in_context: number
+}

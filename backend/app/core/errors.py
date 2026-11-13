@@ -56,6 +56,28 @@ class InvalidFieldError(AppError):
         super().__init__("Request data is invalid", [{"field": field, "message": message}])
 
 
+class AIServiceError(AppError):
+    """The AI provider failed in an unexpected way."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "ai_error"
+
+
+class AIServiceUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "ai_unavailable"
+
+
+class AITimedOutError(AppError):
+    status_code = status.HTTP_504_GATEWAY_TIMEOUT
+    code = "ai_timeout"
+
+
+class RateLimitedError(AppError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+
 class NotFoundError(AppError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"

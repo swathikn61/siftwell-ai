@@ -10,7 +10,8 @@ import { errorMessage } from '../lib/api'
 import { cn, formatINR } from '../lib/format'
 import { productPath } from '../components/ProductCard'
 import { EmptyState, ErrorState, ProductThumb, Skeleton, VerificationBadge } from '../components/ui'
-import type { Comparison, Product, ProductAnalysis, SpecComparison, SpecKey } from '../types/api'
+import { DecisionAssistant } from '../components/DecisionAssistant'
+import type { AssistantContext, Comparison, Product, ProductAnalysis, SpecComparison, SpecKey } from '../types/api'
 
 const specIcons: Record<SpecKey, LucideIcon> = {
   price: Wallet,
@@ -389,6 +390,20 @@ export default function ComparePage() {
   })
   const firstCategory = shown[0]?.category.slug
   const sameCategory = shown.every((p) => p.category.slug === firstCategory)
+
+  // Decision Assistant for this comparison (scores use the engine's default weights)
+  const shownKey = shown.map((p) => p.slug).join(',')
+  const assistantContext: AssistantContext | null = shown.length
+    ? {
+        product_slugs: shown.map((p) => p.slug),
+        preferences: {
+          category: sameCategory ? (firstCategory as 'laptops' | 'smartphones') : null,
+          min_budget_inr: null, max_budget_inr: null, use_cases: [], priorities: [], hardware_preferences: [], brands: [],
+        },
+        weights: null,
+        adjust_for_usage: true,
+      }
+    : null
   const defaultTitle = !sameCategory || !shown.length ? 'My comparison' : `${shown[0].category.name} comparison`
 
   const submitSave = (e: FormEvent) => {
@@ -493,6 +508,21 @@ export default function ComparePage() {
             </div>
           )}
         </>
+      )}
+
+      {complete && (
+        <DecisionAssistant
+          context={assistantContext}
+          storageKey={`siftwell:chat:compare:v1:${shownKey}`}
+          title="Ask about this comparison"
+          suggestions={[
+            'Which is the best overall?',
+            'Which one has the best battery?',
+            'Is the most expensive one worth buying?',
+            'Which is better for programming?',
+            'What are the disadvantages of each?',
+          ]}
+        />
       )}
 
       {picking && (

@@ -115,6 +115,7 @@ Use `include_demo=false` on list/search to hide demo products.
 | POST   | `/api/ai/preferences/validate`  | Validate preferences edited by the user         |
 | GET    | `/api/ai/status`                | Is Gemini configured and reachable?             |
 | POST   | `/api/recommendations`          | Score (0–100) and rank products, with reasons   |
+| POST   | `/api/assistant/chat`           | Ask the AI Decision Assistant about results     |
 | POST   | `/api/products/import`          | Import products from a CSV file                 |
 
 **Filters** (list and search): `category`, `brand` (repeat for several:
@@ -240,6 +241,25 @@ calculates scores or rankings. The same input always gives the same result.
 
 Note: value for money is relative to the products that match, so changing filters or
 must-haves can change value scores (and therefore totals).
+
+## AI Decision Assistant
+
+`POST /api/assistant/chat` answers questions about the products a user is looking at
+(“Why is this ranked first?”, “Which has the best battery?”, “Is the expensive one worth it?”).
+
+- **Separate from scoring:** `app/ai/assistant.py` only explains. Scores come from the
+  rule-based engine and are passed in as facts (`app/ai/assistant_context.py`).
+- **Grounded:** the request sends only product slugs, preferences and weights. Specs and
+  prices are re-read from PostgreSQL; the prompt lists them with the engine's scores,
+  breakdowns, strengths/weaknesses, precomputed price differences, and an explicit list
+  of data Siftwell doesn't have (ratings, benchmarks, weight, battery life, …).
+- **Follow-ups:** send earlier turns in `history` (last 10 kept).
+- **Checks:** structured JSON validated with Pydantic; cited products must be in the
+  context; every number in the answer must appear in the facts or the user's messages,
+  and values with units Siftwell never lists (kg, hours, fps, stars, …) are always
+  flagged. One rewrite is requested if time allows; otherwise the answer carries a warning.
+- **Errors:** rate limit → 429, timeout → 504, missing/rejected key → 503, unusable
+  reply → 502 — all in the standard error format.
 
 ## Test with Swagger UI
 

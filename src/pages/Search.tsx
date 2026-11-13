@@ -4,12 +4,14 @@ import { Info, SearchX, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { SearchBox } from '../components/SearchBox'
 import { ProductCard } from '../components/ProductCard'
 import { PreferencesPanel } from '../components/PreferencesPanel'
+import { DEFAULT_WEIGHTS, ScoringPanel } from '../components/ScoringPanel'
+import { DecisionAssistant } from '../components/DecisionAssistant'
 import { EmptyState, ErrorState, ProductCardSkeleton, Skeleton, categoryIcon } from '../components/ui'
 import { useAsync, useBrands, useCategories, useProducts } from '../hooks/useApi'
 import { api, ApiError, errorMessage } from '../lib/api'
 import { cn, formatINR, formatINRShort } from '../lib/format'
 import { basicSearchUrl, parsePrompt, searchUrl } from '../lib/prompt'
-import type { PreferenceResponse, ProductQuery, RecommendationRequest, RecommendationSort, ShoppingPreferences, SortOption } from '../types/api'
+import type { AssistantContext, Criterion, PreferenceResponse, ProductQuery, RecommendationRequest, RecommendationSort, ShoppingPreferences, SortOption } from '../types/api'
 
 // ---------------------------------------------------------------------------
 // AI results are cached per request for this browser tab, so going back or
@@ -30,6 +32,21 @@ function readAiCache(q: string): AiCacheEntry | null {
     return null
   }
 }
+// Scoring weights are a per-browser preference
+const WEIGHTS_KEY = 'siftwell:weights.v1'
+function readWeights(): { weights: Record<Criterion, number>; adjust: boolean } {
+  try {
+    const raw = localStorage.getItem(WEIGHTS_KEY)
+    if (raw) {
+      const saved = JSON.parse(raw)
+      return { weights: { ...DEFAULT_WEIGHTS, ...saved.weights }, adjust: saved.adjust !== false }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { weights: DEFAULT_WEIGHTS, adjust: true }
+}
+
 function writeAiCache(q: string, entry: AiCacheEntry) {
   try {
     sessionStorage.setItem(aiCacheKey(q), JSON.stringify(entry))
@@ -92,6 +109,19 @@ export default function SearchPage() {
   const aiResponse = ai.data?.q === q ? ai.data.response : undefined
   const [appliedFor, setAppliedFor] = useState<string | null>(null)
   const [appliedPrefs, setAppliedPrefs] = useState<ShoppingPreferences | null>(null)
+  const [weights, setWeights] = useState(() => readWeights().weights)
+  const [adjustForUsage, setAdjustForUsage] = useState(() => readWeights().adjust)
+  // Wait for slider movement to settle before re-scoring
+  const [debouncedWeights, setDebouncedWeights] = useState(weights)
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedWeights(weights), 300)
+    try {
+      localStorage.setItem(WEIGHTS_KEY, JSON.stringify({ weights, adjust: adjustForUsage }))
+    } catch {
+      /* ignore */
+    }
+    return () => window.clearTimeout(t)
+  }, [weights, adjustForUsage])
 
   const applySearch = (search: PreferenceResponse['search']) =>
     update({
@@ -158,6 +188,8 @@ export default function SearchPage() {
             max_budget_inr: maxPrice ?? null,
             brands,
           },
+          weights: debouncedWeights,
+          adjust_for_usage: adjustForUsage,
           sort: recommendationSort,
           limit: PAGE_SIZE * pages,
           offset: 0,
@@ -165,7 +197,18 @@ export default function SearchPage() {
       : null
   const recKey = JSON.stringify(recQuery)
   const rec = useAsync((signal) => api.recommend(recQuery!, signal), [recKey], !!recQuery)
-  const reasonsBySlug = new Map(rec.data?.items.map((i) => [i.product.slug, i.reasons]) ?? [])
+  const matchBySlug = new Map(rec.data?.items.map((i) => [i.product.slug, i]) ?? [])
+
+  // Decision Assistant: the products currently shown (up to 8) plus the preferences and weights in use
+  const assistantSlugs = rec.data?.items.slice(0, 8).map((i) => i.product.slug).join(',') ?? ''
+  const assistantContext = useMemo<AssistantContext | null>(
+    () =>
+      recQuery && assistantSlugs
+        ? { product_slugs: assistantSlugs.split(','), preferences: recQuery.preferences, weights: recQuery.weights, adjust_for_usage: recQuery.adjust_for_usage }
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assistantSlugs, recKey],
+  )
 
   // If the keywords match nothing, fall back to the category/budget filters alone
   const hasStructuredFilters = !!(category || brands.length || minPrice || maxPrice)
@@ -343,31 +386,16 @@ export default function SearchPage() {
             </div>
           )}
 
-          {/* What influenced the order (AI mode) */}
-          {aiMode && rec.data && results && results.total > 0 && (
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm shadow-soft">
-              {recommendationSort !== 'match' ? (
-                <p className="text-slate-600">Sorted by {recommendationSort === 'name' ? 'name' : 'price'} — switch to “Best match” to rank by your preferences.</p>
-              ) : rec.data.ranking_factors.length ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="mr-1 font-medium text-slate-900">Ranked by</span>
-                  {rec.data.ranking_factors.map((f) => (
-                    <span key={f.key} title={f.description} className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', f.source === 'priority' ? 'bg-navy-900 text-white' : 'bg-navy-50 text-navy-800 ring-1 ring-inset ring-navy-100')}>
-                      {f.label} · {f.source === 'priority' ? 'your priority' : 'AI suggestion'}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-slate-600">None of your preferences can be measured from the listed specs, so results are ordered by price (lowest first).</p>
-              )}
-              {recommendationSort === 'match' && rec.data.not_used.length > 0 && (
-                <details className="mt-2 text-xs text-slate-500">
-                  <summary className="cursor-pointer hover:text-slate-700">Not used for ranking ({rec.data.not_used.length})</summary>
-                  <ul className="mt-1.5 space-y-0.5">{rec.data.not_used.map((n) => <li key={n.label}>• <span className="font-medium text-slate-700">{n.label}</span> — {n.reason}</li>)}</ul>
-                </details>
-              )}
-              <p className="mt-2 text-xs text-slate-400">{rec.data.method}</p>
-            </div>
+          {/* How products are scored (AI mode) */}
+          {aiMode && !waitingForAi && !ai.error && (
+            <ScoringPanel
+              data={rec.data}
+              weights={weights}
+              onWeightsChange={setWeights}
+              adjustForUsage={adjustForUsage}
+              onAdjustChange={setAdjustForUsage}
+              sortedByMatch={recommendationSort === 'match'}
+            />
           )}
 
           {/* Toolbar */}
@@ -424,7 +452,7 @@ export default function SearchPage() {
               <div className={cn('grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3', loading && 'opacity-60')}>
                 {results.items.map((p, i) => (
                   <div key={p.slug} className="animate-fade-up grid" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
-                    <ProductCard product={p} reasons={aiMode && recommendationSort === 'match' ? reasonsBySlug.get(p.slug) : undefined} />
+                    <ProductCard product={p} match={aiMode ? matchBySlug.get(p.slug) : undefined} />
                   </div>
                 ))}
               </div>
@@ -439,6 +467,7 @@ export default function SearchPage() {
           )}
         </div>
       </div>
+      {aiMode && <DecisionAssistant context={assistantContext} storageKey={`siftwell:chat:v1:${q}`} />}
     </div>
   )
 }

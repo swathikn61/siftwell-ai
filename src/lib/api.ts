@@ -6,8 +6,8 @@
  *   products instantly after they were loaded once in search results.
  */
 import type {
-  BrandCount, Category, Comparison, Health, PreferenceResponse, Product, ProductPage, ProductQuery, RecommendationRequest,
-  RecommendationResponse, ShoppingPreferences,
+  AssistantContext, AssistantReply, BrandCount, Category, ChatTurn, Comparison, Health, PreferenceResponse, Product, ProductPage,
+  ProductQuery, RecommendationRequest, RecommendationResponse, ShoppingPreferences,
 } from '../types/api'
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/+$/, '')
@@ -140,6 +140,10 @@ export const api = {
     remember(result.items.map((i) => i.product))
     return result
   },
+
+  /** Ask the Decision Assistant about the products in `context` (answers are grounded in backend data). */
+  assistantChat: (question: string, context: AssistantContext, history: ChatTurn[], signal?: AbortSignal) =>
+    request<AssistantReply>('/api/assistant/chat', { body: { question, context, history }, signal }),
 
   async productBySlug(slug: string, signal?: AbortSignal): Promise<Product> {
     const product = await request<Product>(`/api/products/slug/${encodeURIComponent(slug)}`, { signal })
