@@ -16,8 +16,9 @@ from fastapi.responses import RedirectResponse
 from app import __version__
 from app.core.config import settings
 from app.core.errors import register_error_handlers
+from app.core.security import check_auth_config
 from app.database import SessionLocal, create_tables
-from app.routers import ai, assistant, categories, compare, health, products, recommendations
+from app.routers import ai, assistant, auth, categories, compare, health, me, products, recommendations, users
 from app.services.category_service import ensure_default_categories
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
@@ -31,6 +32,7 @@ logger = logging.getLogger("siftwell")
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Code that runs once when the server starts (before `yield`) and stops (after)."""
+    check_auth_config()  # in production, refuse to start without JWT_SECRET_KEY
     try:
         create_tables()
         with SessionLocal() as db:
@@ -70,6 +72,9 @@ app.include_router(compare.router)
 app.include_router(ai.router)
 app.include_router(recommendations.router)
 app.include_router(assistant.router)
+app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(me.router)
 
 
 @app.get("/", include_in_schema=False)

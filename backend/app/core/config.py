@@ -32,7 +32,19 @@ class Settings(BaseSettings):
     gemini_thinking_level: str = "minimal"      # Gemini 3: minimal|low|medium|high ("" = model default)
     gemini_api_base: str = "https://generativelanguage.googleapis.com/v1beta"
 
+    # --- Authentication ----------------------------------------------------
+    # Secret used to sign login tokens (JWT). REQUIRED in production; generate one with:
+    #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+    jwt_secret_key: SecretStr | None = None
+    jwt_expire_minutes: int = 720              # 12 hours
+    login_max_failures: int = 5                # failed logins allowed per email+IP...
+    login_lockout_minutes: int = 15            # ...within this window
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in ("production", "prod")
 
     @field_validator("database_url")
     @classmethod

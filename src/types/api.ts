@@ -254,3 +254,53 @@ export interface AssistantReply {
   duration_ms: number
   products_in_context: number
 }
+
+// ---------------------------------------------------------------------------
+// Accounts and user data
+// ---------------------------------------------------------------------------
+export interface UserPreferencesApi {
+  budget_min: number
+  budget_max: number
+  categories: ('laptops' | 'smartphones')[]
+  priorities: string[]
+  email_digest: boolean
+  price_alerts: boolean
+}
+
+export interface UserAccount {
+  id: number
+  email: string
+  name: string
+  location: string
+  currency: string
+  preferences: UserPreferencesApi
+  created_at: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: 'bearer'
+  expires_in: number
+  user: UserAccount
+}
+
+export interface SavedComparisonApi {
+  id: number
+  title: string
+  note: string | null
+  product_slugs: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface FavouriteApi {
+  product: Product
+  created_at: string
+}
+
+export interface SearchHistoryEntry {
+  id: number
+  query: string
+  filters: { category?: string | null; min_price?: number | null; max_price?: number | null; brands?: string[] }
+  created_at: string
+}

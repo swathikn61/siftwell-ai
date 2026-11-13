@@ -65,7 +65,6 @@ export default function ProfilePage() {
           <p className="font-semibold text-slate-900">{user?.name}</p>
           <p className="text-sm text-slate-500">{user?.email}</p>
         </div>
-        <span className="rounded-full bg-navy-50 px-3 py-1 text-xs font-medium text-navy-800 ring-1 ring-inset ring-navy-100">{user?.plan}</span>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">

@@ -78,6 +78,17 @@ class RateLimitedError(AppError):
     code = "rate_limited"
 
 
+class UnauthorizedError(AppError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    code = "unauthorized"
+    headers = {"WWW-Authenticate": "Bearer"}
+
+
+class ForbiddenError(AppError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "forbidden"
+
+
 class NotFoundError(AppError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"
@@ -91,15 +102,16 @@ class ConflictError(AppError):
 # ---------------------------------------------------------------------------
 # Handlers — turn exceptions into consistent JSON responses
 # ---------------------------------------------------------------------------
-def error_response(status_code: int, code: str, message: str, details: Any = None) -> JSONResponse:
+def error_response(status_code: int, code: str, message: str, details: Any = None, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
+        headers=headers,
         content={"error": {"code": code, "message": message, "details": jsonable_encoder(details)}},
     )
 
 
 async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message, exc.details)
+    return error_response(exc.status_code, exc.code, exc.message, exc.details, getattr(exc, "headers", None))
 
 
 async def http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
