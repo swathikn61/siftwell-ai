@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { Bookmark, Cpu, GitCompareArrows, HardDrive, MemoryStick, Plus } from 'lucide-react'
-import type { Product } from '../types/api'
+import { Bookmark, Check, CircleHelp, Cpu, GitCompareArrows, HardDrive, MemoryStick, Minus, Plus, X } from 'lucide-react'
+import type { Product, RankingReason } from '../types/api'
 import { useApp } from '../context/AppContext'
 import { cn, formatINR } from '../lib/format'
 import { ProductThumb, VerificationBadge } from './ui'
@@ -9,7 +9,14 @@ export function productPath(product: Pick<Product, 'slug'>) {
   return `/app/products/${product.slug}`
 }
 
-export function ProductCard({ product, compact = false }: { product: Product; compact?: boolean }) {
+const reasonStyle = {
+  positive: { icon: Check, cls: 'text-emerald-700', iconCls: 'text-emerald-600' },
+  negative: { icon: X, cls: 'text-rose-700', iconCls: 'text-rose-500' },
+  neutral: { icon: Minus, cls: 'text-slate-600', iconCls: 'text-slate-400' },
+  unknown: { icon: CircleHelp, cls: 'text-slate-500', iconCls: 'text-slate-400' },
+}
+
+export function ProductCard({ product, compact = false, reasons }: { product: Product; compact?: boolean; reasons?: RankingReason[] }) {
   const { compareIds, toggleCompare, savedProductIds, toggleSavedProduct } = useApp()
   const inCompare = compareIds.includes(product.slug)
   const saved = savedProductIds.includes(product.slug)
@@ -59,6 +66,22 @@ export function ProductCard({ product, compact = false }: { product: Product; co
           </ul>
         )}
         <p className="mt-3 text-lg font-semibold tracking-tight text-slate-900">{formatINR(product.price_inr)}</p>
+        {reasons && reasons.length > 0 && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Why it’s ranked here</p>
+            <ul className="mt-1.5 space-y-1">
+              {reasons.map((r) => {
+                const st = reasonStyle[r.effect]
+                return (
+                  <li key={r.factor} className={cn('flex items-start gap-1.5 text-xs leading-snug', st.cls)}>
+                    <st.icon className={cn('mt-px h-3.5 w-3.5 shrink-0', st.iconCls)} strokeWidth={2.5} />
+                    <span>{r.text}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
         <div className="mt-auto pt-4">
           <button
             onClick={() => toggleCompare(product.slug)}

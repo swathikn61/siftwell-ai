@@ -86,8 +86,16 @@ export function parsePrompt(prompt: string): ParsedPrompt {
   return result
 }
 
-/** URL search params for the search page, built from a prompt. */
+/**
+ * Search page URL for a natural-language request. `ai=1` tells the search page
+ * to ask the backend AI to extract preferences before searching.
+ */
 export function searchUrl(prompt: string): string {
+  return `/app/search?${new URLSearchParams({ q: prompt.trim(), ai: '1' }).toString()}`
+}
+
+/** Search page URL using simple rule-based parsing only (no AI). */
+export function basicSearchUrl(prompt: string): string {
   const parsed = parsePrompt(prompt)
   const params = new URLSearchParams({ q: prompt.trim() })
   if (parsed.category) params.set('category', parsed.category)

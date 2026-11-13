@@ -16,6 +16,9 @@ AI-powered product comparison platform (in development).
    ```
 
    The API runs at http://localhost:8000 (Swagger UI at `/docs`).
+   For AI search, add `GEMINI_API_KEY` to `backend/.env` (see
+   [backend/README.md](backend/README.md#ai-preference-extraction-google-gemini)).
+   Without a key, search still works using basic text matching.
 
 2. **Start the frontend** in another terminal, from this folder:
 
@@ -34,6 +37,7 @@ address, copy `.env.example` to `.env.local` and change `VITE_API_URL`.
 | Data                                   | Source                                   |
 | -------------------------------------- | ---------------------------------------- |
 | Products, categories, brands, search   | Backend API (PostgreSQL)                 |
+| Understanding search requests          | Backend → Google Gemini (key stays on the server) |
 | Saved comparisons, saved products, compare list, profile, preferences | Browser storage (no accounts yet) |
 | Login                                  | Simulated in the browser                 |
 

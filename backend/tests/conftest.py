@@ -6,6 +6,8 @@ touch your real PostgreSQL data.
 import os
 
 os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+# Never call the real Gemini API from tests: no key unless a test injects a fake client
+os.environ["GEMINI_API_KEY"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

@@ -111,3 +111,88 @@ export interface Comparison {
   summary: ComparisonSummary
   method: string
 }
+
+// ---------------------------------------------------------------------------
+// AI preference extraction (POST /api/ai/preferences)
+// ---------------------------------------------------------------------------
+export type HardwareSpec = 'processor' | 'ram' | 'storage' | 'battery' | 'display' | 'graphics'
+
+export interface HardwarePreference {
+  spec: HardwareSpec
+  preference: string
+  reason: string
+}
+
+export interface ShoppingPreferences {
+  category: 'laptops' | 'smartphones' | null
+  min_budget_inr: number | null
+  max_budget_inr: number | null
+  use_cases: string[]
+  priorities: string[]
+  hardware_preferences: HardwarePreference[]
+  brands: string[]
+}
+
+export interface PreferenceResponse {
+  preferences: ShoppingPreferences
+  search: { category: string | null; min_price: number | null; max_price: number | null; brand: string[] }
+  /** ai = extracted by Gemini · rules = fallback parser · user = edited by the user */
+  source: 'ai' | 'rules' | 'user'
+  model: string | null
+  duration_ms: number
+  warnings: string[]
+  diagnostics: AIDiagnostics | null
+}
+
+export interface AIDiagnostics {
+  attempts: number
+  connect_ms: number | null
+  model_wait_ms: number | null
+  server_ms: number | null
+  api_total_ms: number
+  extraction_total_ms: number
+  prompt_tokens: number | null
+  output_tokens: number | null
+  thought_tokens: number | null
+  thinking_level: string | null
+}
+
+// ---------------------------------------------------------------------------
+// Preference-aware ranking (POST /api/recommendations)
+// ---------------------------------------------------------------------------
+export interface RankingReason {
+  factor: string
+  effect: 'positive' | 'negative' | 'neutral' | 'unknown'
+  text: string
+}
+
+export interface RankingFactor {
+  key: string
+  label: string
+  /** priority = stated by the user · suggestion = AI hardware guideline */
+  source: 'priority' | 'suggestion'
+  kind: 'threshold' | 'relative' | 'feature'
+  description: string
+}
+
+export type RecommendationSort = 'match' | 'price_asc' | 'price_desc' | 'name'
+
+export interface RecommendationRequest {
+  preferences: ShoppingPreferences
+  sort: RecommendationSort
+  limit: number
+  offset: number
+}
+
+export interface RecommendationResponse {
+  preferences: ShoppingPreferences
+  items: { product: Product; score: number; reasons: RankingReason[] }[]
+  total: number
+  limit: number
+  offset: number
+  ranking_factors: RankingFactor[]
+  not_used: { label: string; reason: string }[]
+  sort: RecommendationSort
+  warnings: string[]
+  method: string
+}

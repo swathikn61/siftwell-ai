@@ -7,7 +7,7 @@ Values are read from environment variables, or from a `.env` file in the
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     # Stored as a comma-separated string in .env, e.g.
     # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    # --- Google Gemini (AI) ------------------------------------------------
+    # The key stays on the server: it is never sent to the browser or logged.
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3.5-flash-lite"  # fast Flash model on the free tier
+    gemini_timeout_seconds: float = 10.0        # one API call
+    gemini_total_timeout_seconds: float = 15.0  # whole extraction, including any retry
+    gemini_max_output_tokens: int = 800         # thinking tokens count toward this too
+    gemini_thinking_level: str = "minimal"      # Gemini 3: minimal|low|medium|high ("" = model default)
+    gemini_api_base: str = "https://generativelanguage.googleapis.com/v1beta"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

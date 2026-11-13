@@ -5,7 +5,10 @@
  * - Products are cached by slug, so pages like Compare and Saved can show
  *   products instantly after they were loaded once in search results.
  */
-import type { BrandCount, Category, Comparison, Health, Product, ProductPage, ProductQuery } from '../types/api'
+import type {
+  BrandCount, Category, Comparison, Health, PreferenceResponse, Product, ProductPage, ProductQuery, RecommendationRequest,
+  RecommendationResponse, ShoppingPreferences,
+} from '../types/api'
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/+$/, '')
 
@@ -45,10 +48,15 @@ function buildUrl(path: string, params?: Params) {
   return url.toString()
 }
 
-async function request<T>(path: string, options: { params?: Params; signal?: AbortSignal } = {}): Promise<T> {
+async function request<T>(path: string, options: { params?: Params; signal?: AbortSignal; body?: unknown } = {}): Promise<T> {
   let res: Response
   try {
-    res = await fetch(buildUrl(path, options.params), { signal: options.signal, headers: { Accept: 'application/json' } })
+    res = await fetch(buildUrl(path, options.params), {
+      method: options.body === undefined ? 'GET' : 'POST',
+      signal: options.signal,
+      headers: { Accept: 'application/json', ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err
     throw new ApiError(0, 'network_error', `Can’t reach the Siftwell server. Make sure the backend is running at ${API_URL}.`)
@@ -115,6 +123,21 @@ export const api = {
   async compare(slugs: string[], signal?: AbortSignal): Promise<Comparison> {
     const result = await request<Comparison>('/api/compare', { params: { products: slugs }, signal })
     remember(result.products)
+    return result
+  },
+
+  /** AI preference extraction (the Gemini API key stays on the backend). */
+  aiPreferences: (query: string, signal?: AbortSignal) =>
+    request<PreferenceResponse>('/api/ai/preferences', { body: { query }, signal }),
+
+  /** Validate preferences the user edited; returns the matching search filters. */
+  validatePreferences: (preferences: ShoppingPreferences, signal?: AbortSignal) =>
+    request<PreferenceResponse>('/api/ai/preferences/validate', { body: preferences, signal }),
+
+  /** Rule-based ranking of products against validated preferences, with explanations. */
+  async recommend(body: RecommendationRequest, signal?: AbortSignal): Promise<RecommendationResponse> {
+    const result = await request<RecommendationResponse>('/api/recommendations', { body, signal })
+    remember(result.items.map((i) => i.product))
     return result
   },
 

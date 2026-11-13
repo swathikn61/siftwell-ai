@@ -111,6 +111,10 @@ Use `include_demo=false` on list/search to hide demo products.
 | DELETE | `/api/products/{id}`            | Delete a product                                |
 | GET    | `/api/products/import/template` | Download a CSV template                         |
 | GET    | `/api/compare?products=a&products=b` | Rule-based comparison of 1–4 products       |
+| POST   | `/api/ai/preferences`           | AI preference extraction (Gemini)               |
+| POST   | `/api/ai/preferences/validate`  | Validate preferences edited by the user         |
+| GET    | `/api/ai/status`                | Is Gemini configured and reachable?             |
+| POST   | `/api/recommendations`          | Rank products against preferences, with reasons |
 | POST   | `/api/products/import`          | Import products from a CSV file                 |
 
 **Filters** (list and search): `category`, `brand` (repeat for several:
@@ -158,6 +162,67 @@ Advantages and disadvantages are relative to the products being compared
 display panel types (OLED, Mini-LED) when not every product has one.
 The parsing lives in `app/services/spec_parser.py` and the rules in
 `app/services/comparison_service.py`.
+
+## AI preference extraction (Google Gemini)
+
+`POST /api/ai/preferences` turns a request like *“I need a laptop under ₹70,000
+for Java development, college work and occasional gaming. Battery life is
+important.”* into validated preferences (category, budget, uses, priorities,
+general hardware guidance, brands) plus ready-to-use search filters.
+
+**Setup:** create a free API key at https://aistudio.google.com/apikey and add it
+to `backend/.env` (never to the frontend):
+
+```
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_TIMEOUT_SECONDS=10
+GEMINI_TOTAL_TIMEOUT_SECONDS=15
+GEMINI_THINKING_LEVEL=minimal
+```
+
+Restart the server, then check `GET /api/ai/status` — it should say `"available": true`.
+
+**How it works**
+
+- `app/ai/gemini_client.py` calls Gemini's `generateContent` with structured JSON
+  output (`responseMimeType` + `responseJsonSchema`) and temperature 0. The key is
+  sent in a header, never in a URL, and is never logged or returned.
+- `app/ai/preference_extractor.py` tidies and validates the reply with Pydantic,
+  retries once if the JSON is broken or invalid, and then checks it against the
+  user's words: budgets and brands must appear in the request, an explicit
+  category word wins, and suggestions naming specific chips or products are removed.
+- If Gemini is unavailable, rate-limited (HTTP 429), times out, rejects the key, or
+  keeps returning bad data, a rule-based parser (`app/ai/rules.py`) is used instead.
+  The response says `"source": "rules"` and `warnings` explains why. Temporary
+  server errors (5xx) are retried once; rate limits are not retried.
+- **Timeouts and retries:** each call has a 10 s limit and the whole extraction a
+  15 s budget. A retry only happens if the first attempt failed quickly (e.g. an
+  instant 503 or invalid JSON) *and* enough of the budget is left, so users don't
+  wait through two slow calls. Rate limits, timeouts and auth errors are never retried.
+- **Measured timing:** every response includes `diagnostics` (connection setup,
+  model wait, Google's server time, prompt/output/thinking tokens). The HTTPS
+  connection to Gemini is reused between requests.
+- `POST /api/ai/preferences/validate` validates preferences the user edited
+  (Pydantic + catalogue check: unknown categories/brands are removed with a warning).
+
+## Preference-aware ranking
+
+`POST /api/recommendations` takes validated preferences, filters by category,
+budget and brands, then ranks with plain rules using only listed specs
+(`app/services/recommendation_service.py`):
+
+- Guidelines with a number (“At least 16 GB”, “5,000 mAh or more”, “120 Hz”) are
+  checked as thresholds; “Dedicated graphics” is checked against the listed graphics.
+- Guidelines without a number and stated priorities (battery life, performance,
+  display, storage, value for money) compare products with the other results.
+- Each result lists why it ranked where it did (met / missed / not listed), and
+  `not_used` explains preferences that couldn't influence ranking (e.g. camera or
+  weight aren't listed; uses only count through the hardware guidelines).
+- AI hardware guidelines are treated as suggestions, never verified requirements.
+- The AI never returns product specifications — only the user's preferences.
+
+Tests never call the real API: Gemini is mocked with `httpx.MockTransport`.
 
 ## Test with Swagger UI
 

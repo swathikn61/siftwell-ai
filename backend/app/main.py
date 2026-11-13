@@ -17,10 +17,14 @@ from app import __version__
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.database import SessionLocal, create_tables
-from app.routers import categories, compare, health, products
+from app.routers import ai, categories, compare, health, products, recommendations
 from app.services.category_service import ensure_default_categories
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+# Keep low-level HTTP libraries quiet, even in debug mode (less noise, and no
+# chance of request details such as API headers ending up in logs)
+for noisy in ("httpx", "httpcore"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("siftwell")
 
 
@@ -36,6 +40,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Keep the server running so /api/health can report the problem
         logger.error("Could not connect to the database: %s", exc)
     yield
+    # Close the shared Gemini HTTP connection on shutdown
+    if ai._shared_client.cache_info().currsize:
+        ai._shared_client().close()
 
 
 app = FastAPI(
@@ -60,6 +67,8 @@ app.include_router(health.router)
 app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(compare.router)
+app.include_router(ai.router)
+app.include_router(recommendations.router)
 
 
 @app.get("/", include_in_schema=False)

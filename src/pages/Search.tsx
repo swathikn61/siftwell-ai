@@ -3,12 +3,40 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Info, SearchX, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { SearchBox } from '../components/SearchBox'
 import { ProductCard } from '../components/ProductCard'
+import { PreferencesPanel } from '../components/PreferencesPanel'
 import { EmptyState, ErrorState, ProductCardSkeleton, Skeleton, categoryIcon } from '../components/ui'
-import { useBrands, useCategories, useProducts } from '../hooks/useApi'
-import { errorMessage } from '../lib/api'
+import { useAsync, useBrands, useCategories, useProducts } from '../hooks/useApi'
+import { api, ApiError, errorMessage } from '../lib/api'
 import { cn, formatINR, formatINRShort } from '../lib/format'
-import { parsePrompt, searchUrl } from '../lib/prompt'
-import type { ProductQuery, SortOption } from '../types/api'
+import { basicSearchUrl, parsePrompt, searchUrl } from '../lib/prompt'
+import type { PreferenceResponse, ProductQuery, RecommendationRequest, RecommendationSort, ShoppingPreferences, SortOption } from '../types/api'
+
+// ---------------------------------------------------------------------------
+// AI results are cached per request for this browser tab, so going back or
+// changing a filter doesn't call the AI again.
+// ---------------------------------------------------------------------------
+interface AiCacheEntry {
+  response: PreferenceResponse
+  applied: boolean
+  /** Preferences after the user's last validated edit (uses, priorities, guidelines) */
+  appliedPreferences?: ShoppingPreferences
+}
+const aiCacheKey = (q: string) => `siftwell:ai:v1:${q}`
+function readAiCache(q: string): AiCacheEntry | null {
+  try {
+    const raw = sessionStorage.getItem(aiCacheKey(q))
+    return raw ? (JSON.parse(raw) as AiCacheEntry) : null
+  } catch {
+    return null
+  }
+}
+function writeAiCache(q: string, entry: AiCacheEntry) {
+  try {
+    sessionStorage.setItem(aiCacheKey(q), JSON.stringify(entry))
+  } catch {
+    /* storage unavailable — the result just won't be cached */
+  }
+}
 
 const PAGE_SIZE = 12
 
@@ -54,22 +82,103 @@ export default function SearchPage() {
     setParams(next, { replace: true })
   }
 
-  // Category and budget words are turned into filters, the rest is sent as keywords
-  const keywords = useMemo(() => parsePrompt(q).keywords, [q])
+  // --- AI mode: the backend extracts preferences, which become the filters ---
+  const aiMode = params.get('ai') === '1' && q.trim().length >= 3
+  const ai = useAsync(
+    async (signal) => ({ q, response: readAiCache(q)?.response ?? (await api.aiPreferences(q, signal)) }),
+    [q],
+    aiMode,
+  )
+  const aiResponse = ai.data?.q === q ? ai.data.response : undefined
+  const [appliedFor, setAppliedFor] = useState<string | null>(null)
+  const [appliedPrefs, setAppliedPrefs] = useState<ShoppingPreferences | null>(null)
+
+  const applySearch = (search: PreferenceResponse['search']) =>
+    update({
+      category: search.category,
+      min: search.min_price ? String(search.min_price) : null,
+      max: search.max_price ? String(search.max_price) : null,
+      brand: search.brand,
+    })
+
+  // First result for a request: remember it and apply its filters once
+  useEffect(() => {
+    if (!aiMode || !aiResponse) return
+    const cached = readAiCache(q)
+    if (!cached?.applied) {
+      writeAiCache(q, { response: aiResponse, applied: true })
+      applySearch(aiResponse.search)
+    }
+    setAppliedPrefs(cached?.appliedPreferences ?? aiResponse.preferences)
+    setAppliedFor(q)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiMode, aiResponse, q])
+
+  // Edits are validated by the backend (Pydantic + catalogue check) before they affect results
+  const applyEditedPreferences = async (prefs: ShoppingPreferences): Promise<{ error: string | null; warnings: string[] }> => {
+    try {
+      const validated = await api.validatePreferences(prefs)
+      const cached = readAiCache(q)
+      if (cached) writeAiCache(q, { ...cached, appliedPreferences: validated.preferences })
+      setAppliedPrefs(validated.preferences)
+      applySearch(validated.search)
+      return { error: null, warnings: validated.warnings }
+    } catch (err) {
+      if (err instanceof ApiError && Array.isArray(err.details)) {
+        const text = (err.details as { field: string; message: string }[]).map((d) => `${d.field || 'Preferences'}: ${d.message}`).join(' · ')
+        return { error: text, warnings: [] }
+      }
+      return { error: errorMessage(err), warnings: [] }
+    }
+  }
+  const waitingForAi = aiMode && appliedFor !== q
+  // The panel shows the preferences currently in use (the user's validated edits, if any)
+  const panelResponse = useMemo(
+    () => (aiResponse && appliedPrefs ? { ...aiResponse, preferences: appliedPrefs } : aiResponse),
+    [aiResponse, appliedPrefs],
+  )
+
+  // Without AI: category and budget words are turned into filters, the rest is sent as keywords
+  const keywords = useMemo(() => (aiMode ? [] : parsePrompt(q).keywords), [q, aiMode])
   const filterKey = JSON.stringify([q, category, brands, minPrice, maxPrice, sort])
   useEffect(() => setPages(1), [filterKey])
 
   const baseQuery: ProductQuery = { category, brand: brands, min_price: minPrice, max_price: maxPrice, sort, limit: PAGE_SIZE * pages }
-  const primary = useProducts({ ...baseQuery, q: keywords.join(' ') || undefined })
+  const primary = useProducts({ ...baseQuery, q: keywords.join(' ') || undefined }, !aiMode)
+
+  // AI mode: rank products against the preferences (category/budget/brands come from the URL filters)
+  const recommendationSort: RecommendationSort = sort === 'price_asc' || sort === 'price_desc' || sort === 'name' ? sort : 'match'
+  const recQuery: RecommendationRequest | null =
+    aiMode && !waitingForAi && appliedPrefs
+      ? {
+          preferences: {
+            ...appliedPrefs,
+            category: (category as ShoppingPreferences['category']) ?? null,
+            min_budget_inr: minPrice ?? null,
+            max_budget_inr: maxPrice ?? null,
+            brands,
+          },
+          sort: recommendationSort,
+          limit: PAGE_SIZE * pages,
+          offset: 0,
+        }
+      : null
+  const recKey = JSON.stringify(recQuery)
+  const rec = useAsync((signal) => api.recommend(recQuery!, signal), [recKey], !!recQuery)
+  const reasonsBySlug = new Map(rec.data?.items.map((i) => [i.product.slug, i.reasons]) ?? [])
 
   // If the keywords match nothing, fall back to the category/budget filters alone
   const hasStructuredFilters = !!(category || brands.length || minPrice || maxPrice)
   const needFallback = !primary.loading && !primary.error && primary.data?.total === 0 && keywords.length > 0 && hasStructuredFilters
   const fallback = useProducts(baseQuery, needFallback)
   const usingFallback = needFallback && (fallback.data?.total ?? 0) > 0
-  const active = usingFallback ? fallback : primary
+  const active = aiMode
+    ? { data: rec.data && { items: rec.data.items.map((i) => i.product), total: rec.data.total }, error: rec.error, loading: rec.loading, reload: rec.reload }
+    : usingFallback
+      ? fallback
+      : primary
   const results = active.data
-  const loading = primary.loading || (needFallback && fallback.loading)
+  const loading = waitingForAi || active.loading || (!aiMode && needFallback && fallback.loading)
 
   const categories = useCategories()
   const brandList = useBrands(category)
@@ -187,15 +296,30 @@ export default function SearchPage() {
         <p className="mt-1 text-sm text-slate-500">Describe what you need — category, budget in rupees and must-have specs.</p>
       </div>
       <div className="mt-5">
-        <SearchBox initial={q} size="md" onSearch={(v) => navigate(searchUrl(v), { replace: true })} autoFocus={!q && !category} placeholder="e.g. “laptop under ₹80,000 with OLED display”" />
+        <SearchBox initial={q} size="md" onSearch={(v) => navigate(searchUrl(v), { replace: true })} autoFocus={!q && !category} placeholder="e.g. “laptop under ₹70,000 for Java development and gaming”" />
       </div>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[230px_1fr]">
         <aside className="hidden lg:block">{filters}</aside>
 
         <div className="min-w-0">
-          {/* How the prompt was understood */}
-          {q && (
+          {/* AI-extracted preferences (editable) */}
+          {aiMode && (
+            <div className="mb-5">
+              <PreferencesPanel
+                response={panelResponse}
+                loading={ai.loading}
+                error={ai.error ? errorMessage(ai.error) : undefined}
+                onRetry={ai.reload}
+                onUseBasic={() => navigate(basicSearchUrl(q), { replace: true })}
+                onApply={applyEditedPreferences}
+                current={{ category, min: minPrice, max: maxPrice, brands }}
+              />
+            </div>
+          )}
+
+          {/* How the prompt was understood (without AI) */}
+          {q && !aiMode && (
             <div className="card mb-5 flex gap-3.5 p-4">
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-navy-900 text-white">
                 <Sparkles className="h-4 w-4" />
@@ -219,6 +343,33 @@ export default function SearchPage() {
             </div>
           )}
 
+          {/* What influenced the order (AI mode) */}
+          {aiMode && rec.data && results && results.total > 0 && (
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm shadow-soft">
+              {recommendationSort !== 'match' ? (
+                <p className="text-slate-600">Sorted by {recommendationSort === 'name' ? 'name' : 'price'} — switch to “Best match” to rank by your preferences.</p>
+              ) : rec.data.ranking_factors.length ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 font-medium text-slate-900">Ranked by</span>
+                  {rec.data.ranking_factors.map((f) => (
+                    <span key={f.key} title={f.description} className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', f.source === 'priority' ? 'bg-navy-900 text-white' : 'bg-navy-50 text-navy-800 ring-1 ring-inset ring-navy-100')}>
+                      {f.label} · {f.source === 'priority' ? 'your priority' : 'AI suggestion'}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-600">None of your preferences can be measured from the listed specs, so results are ordered by price (lowest first).</p>
+              )}
+              {recommendationSort === 'match' && rec.data.not_used.length > 0 && (
+                <details className="mt-2 text-xs text-slate-500">
+                  <summary className="cursor-pointer hover:text-slate-700">Not used for ranking ({rec.data.not_used.length})</summary>
+                  <ul className="mt-1.5 space-y-0.5">{rec.data.not_used.map((n) => <li key={n.label}>• <span className="font-medium text-slate-700">{n.label}</span> — {n.reason}</li>)}</ul>
+                </details>
+              )}
+              <p className="mt-2 text-xs text-slate-400">{rec.data.method}</p>
+            </div>
+          )}
+
           {/* Toolbar */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -236,14 +387,14 @@ export default function SearchPage() {
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Filters{activeChips.length > 0 && ` (${activeChips.length})`}
               </button>
               <select value={sort ?? ''} onChange={(e) => update({ sort: e.target.value || null })} className="input w-auto py-2 pr-8 text-xs" aria-label="Sort results">
-                {sorts.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                {sorts.filter((s) => !aiMode || s.id !== 'newest').map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </div>
           </div>
           {showFilters && <div className="card animate-fade-in mb-6 p-5 lg:hidden">{filters}</div>}
 
           {/* Results */}
-          {active.error ? (
+          {aiMode && ai.error ? null : active.error ? (
             <ErrorState
               title="Couldn’t load products"
               message={errorMessage(active.error)}
@@ -253,7 +404,7 @@ export default function SearchPage() {
                 if (brandList.error) brandList.reload()
               }}
             />
-          ) : loading && !results?.items.length ? (
+          ) : waitingForAi || (loading && !results?.items.length) ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => <ProductCardSkeleton key={i} />)}
             </div>
@@ -273,7 +424,7 @@ export default function SearchPage() {
               <div className={cn('grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3', loading && 'opacity-60')}>
                 {results.items.map((p, i) => (
                   <div key={p.slug} className="animate-fade-up grid" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
-                    <ProductCard product={p} />
+                    <ProductCard product={p} reasons={aiMode && recommendationSort === 'match' ? reasonsBySlug.get(p.slug) : undefined} />
                   </div>
                 ))}
               </div>
