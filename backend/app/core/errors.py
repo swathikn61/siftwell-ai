@@ -41,6 +41,21 @@ class AppError(Exception):
         self.details = details
 
 
+class BadRequestError(AppError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "bad_request"
+
+
+class InvalidFieldError(AppError):
+    """A field passed basic validation but failed a business rule (e.g. unknown category)."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    code = "validation_error"
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__("Request data is invalid", [{"field": field, "message": message}])
+
+
 class NotFoundError(AppError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "not_found"

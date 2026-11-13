@@ -1,4 +1,30 @@
+from app.schemas.category import CategoryRead, CategoryWithCount
 from app.schemas.health import HealthResponse
-from app.schemas.product import ProductCreate, ProductList, ProductRead, ProductUpdate
+from app.schemas.product import (
+    BrandCount,
+    ImportResult,
+    ImportRowError,
+    ProductCreate,
+    ProductList,
+    ProductRead,
+    ProductUpdate,
+    SpecificationCreate,
+    SpecificationRead,
+    SpecificationUpdate,
+)
 
-__all__ = ["HealthResponse", "ProductCreate", "ProductList", "ProductRead", "ProductUpdate"]
+__all__ = [
+    "BrandCount",
+    "CategoryRead",
+    "CategoryWithCount",
+    "HealthResponse",
+    "ImportResult",
+    "ImportRowError",
+    "ProductCreate",
+    "ProductList",
+    "ProductRead",
+    "ProductUpdate",
+    "SpecificationCreate",
+    "SpecificationRead",
+    "SpecificationUpdate",
+]

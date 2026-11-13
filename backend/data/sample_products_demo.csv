@@ -1,0 +1,5 @@
+name,brand,model,category,price_inr,slug,image_url,processor,ram,storage,battery,display,graphics,source_url,last_verified_date,is_demo
+Aurora Book Pro 16,Northwind,AB16P-26,laptops,"₹1,49,990",,,"12-core CPU, up to 5.0 GHz",32 GB LPDDR5,1 TB NVMe SSD,86 Wh,"16"" 3200×2000 OLED, 120 Hz",Integrated,,,true
+Forge 17 Gaming,Ironpeak,FG17-26,laptops,154990,,,"16-core CPU, up to 5.4 GHz",32 GB DDR5,2 TB NVMe SSD,99 Wh,"17.3"" 2560×1440 IPS, 240 Hz","Dedicated GPU, 12 GB",,,true
+Nova A7,Brightline,NA7-26,smartphones,34999,,,Octa-core 4 nm chip,8 GB,256 GB,"5,500 mAh","6.6"" OLED, 120 Hz",,,,true
+Pulse 9 Pro,Tempo,P9P-26,smartphones,"56,999",,,Octa-core 3 nm chip,16 GB,512 GB,"5,000 mAh","6.8"" LTPO AMOLED, 144 Hz",,,,true

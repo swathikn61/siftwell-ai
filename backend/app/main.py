@@ -16,8 +16,9 @@ from fastapi.responses import RedirectResponse
 from app import __version__
 from app.core.config import settings
 from app.core.errors import register_error_handlers
-from app.database import create_tables
-from app.routers import health, products
+from app.database import SessionLocal, create_tables
+from app.routers import categories, health, products
+from app.services.category_service import ensure_default_categories
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 logger = logging.getLogger("siftwell")
@@ -28,6 +29,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Code that runs once when the server starts (before `yield`) and stops (after)."""
     try:
         create_tables()
+        with SessionLocal() as db:
+            ensure_default_categories(db)
         logger.info("Database connected and tables are ready")
     except Exception as exc:
         # Keep the server running so /api/health can report the problem
@@ -54,6 +57,7 @@ app.add_middleware(
 register_error_handlers(app)
 
 app.include_router(health.router)
+app.include_router(categories.router)
 app.include_router(products.router)
 
 
