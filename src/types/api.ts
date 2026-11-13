@@ -70,3 +70,44 @@ export interface ProductQuery {
   limit?: number
   offset?: number
 }
+
+// ---------------------------------------------------------------------------
+// Comparison (GET /api/compare)
+// ---------------------------------------------------------------------------
+export type SpecKey = 'price' | 'processor' | 'ram' | 'storage' | 'battery' | 'display' | 'graphics'
+
+export interface SpecComparison {
+  key: SpecKey
+  label: string
+  values: { slug: string; display: string | null }[]
+  /** Slugs of the best product(s); empty when the data doesn't support a winner */
+  best: string[]
+  reason: string | null
+  not_compared: string | null
+}
+
+export interface ProductAnalysis {
+  slug: string
+  advantages: string[]
+  disadvantages: string[]
+  specs_led: string[]
+  missing_specs: string[]
+}
+
+export interface ComparisonSummary {
+  headline: string
+  points: string[]
+  notes: string[]
+  lowest_price: string | null
+  most_specs_led: string | null
+  compared_specs: number
+}
+
+export interface Comparison {
+  products: Product[]
+  missing: string[]
+  specs: SpecComparison[]
+  analysis: ProductAnalysis[]
+  summary: ComparisonSummary
+  method: string
+}

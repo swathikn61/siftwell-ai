@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type DependencyList } from 'react'
 import { api, ApiError, cachedProduct } from '../lib/api'
-import type { BrandCount, Category, Product, ProductPage, ProductQuery } from '../types/api'
+import type { BrandCount, Category, Comparison, Product, ProductPage, ProductQuery } from '../types/api'
 
 export interface AsyncState<T> {
   data: T | undefined
@@ -105,4 +105,8 @@ export function useProductsBySlugs(slugs: string[]) {
   const missing = state.data?.filter((r) => !r.product).map((r) => r.slug) ?? []
   const products = slugs.map((s) => bySlug.get(s)).filter((p): p is Product => !!p)
   return { ...state, products, bySlug, missing, loading: state.loading && products.length < slugs.length }
+}
+
+export function useComparison(slugs: string[]): AsyncState<Comparison> {
+  return useAsync((signal) => api.compare(slugs, signal), [slugs.join(',')], slugs.length > 0)
 }

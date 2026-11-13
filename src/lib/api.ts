@@ -5,7 +5,7 @@
  * - Products are cached by slug, so pages like Compare and Saved can show
  *   products instantly after they were loaded once in search results.
  */
-import type { BrandCount, Category, Health, Product, ProductPage, ProductQuery } from '../types/api'
+import type { BrandCount, Category, Comparison, Health, Product, ProductPage, ProductQuery } from '../types/api'
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/+$/, '')
 
@@ -109,6 +109,13 @@ export const api = {
       : await request<ProductPage>('/api/products', { params: rest, signal })
     remember(page.items)
     return page
+  },
+
+  /** Rule-based comparison of 1–4 products (by slug). */
+  async compare(slugs: string[], signal?: AbortSignal): Promise<Comparison> {
+    const result = await request<Comparison>('/api/compare', { params: { products: slugs }, signal })
+    remember(result.products)
+    return result
   },
 
   async productBySlug(slug: string, signal?: AbortSignal): Promise<Product> {

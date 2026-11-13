@@ -1,37 +1,34 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Battery, Bookmark, GitCompareArrows, HardDrive, Info, Link2, MemoryStick, Minus, Plus, Search, Wallet, X } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  Battery, Bookmark, Check, Cpu, GitCompareArrows, HardDrive, Info, Link2, MemoryStick, Minus, Monitor, Plus, Scale,
+  Search, ThumbsDown, ThumbsUp, Trash2, Trophy, Wallet, X, Zap, type LucideIcon,
+} from 'lucide-react'
 import { MAX_COMPARE, useApp } from '../context/AppContext'
-import { useProducts, useProductsBySlugs } from '../hooks/useApi'
+import { useComparison, useProducts } from '../hooks/useApi'
 import { errorMessage } from '../lib/api'
 import { cn, formatINR } from '../lib/format'
 import { productPath } from '../components/ProductCard'
 import { EmptyState, ErrorState, ProductThumb, Skeleton, VerificationBadge } from '../components/ui'
-import type { Product, Specifications } from '../types/api'
+import type { Comparison, Product, ProductAnalysis, SpecComparison, SpecKey } from '../types/api'
+
+const specIcons: Record<SpecKey, LucideIcon> = {
+  price: Wallet,
+  processor: Cpu,
+  ram: MemoryStick,
+  storage: HardDrive,
+  battery: Battery,
+  display: Monitor,
+  graphics: Zap,
+}
+
+/** Specs whose listed text is identical for every product (hidden by "differences only"). */
+function allSame(spec: SpecComparison) {
+  return new Set(spec.values.map((v) => v.display ?? '')).size <= 1
+}
 
 // ---------------------------------------------------------------------------
-// Parse comparable numbers out of spec text ("16 GB LPDDR5" → 16, "1 TB SSD" → 1024)
-// ---------------------------------------------------------------------------
-function sizeInGB(text: string | null | undefined): number | undefined {
-  const m = text?.match(/(\d+(?:\.\d+)?)\s*(TB|GB)/i)
-  if (!m) return undefined
-  return parseFloat(m[1]) * (m[2].toUpperCase() === 'TB' ? 1024 : 1)
-}
-
-function battery(text: string | null | undefined): { value: number; unit: string } | undefined {
-  const m = text?.replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mAh|Wh)/i)
-  return m ? { value: parseFloat(m[1]), unit: m[2].toLowerCase() } : undefined
-}
-
-type Metric = { key: string; label: string; icon: typeof Wallet; values: (number | undefined)[]; best: 'min' | 'max'; format: (p: Product) => string }
-
-function bestIndexes(values: (number | undefined)[], best: 'min' | 'max'): Set<number> {
-  const nums = values.filter((v): v is number => v !== undefined)
-  if (nums.length < 2 || new Set(nums).size < 2) return new Set() // nothing to compare, or all equal
-  const target = best === 'min' ? Math.min(...nums) : Math.max(...nums)
-  return new Set(values.flatMap((v, i) => (v === target ? [i] : [])))
-}
-
+// Small building blocks
 // ---------------------------------------------------------------------------
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
@@ -55,14 +52,14 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
-function AddProductPicker({ exclude, category, onPick }: { exclude: string[]; category?: string; onPick: (slug: string) => void }) {
+function ProductPicker({ exclude, category, onPick }: { exclude: string[]; category?: string; onPick: (slug: string) => void }) {
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(text.trim()), 250)
     return () => window.clearTimeout(t)
   }, [text])
-  const { data, loading, error, reload } = useProducts({ q: query || undefined, category: query ? undefined : category, limit: 10 })
+  const { data, loading, error, reload } = useProducts({ q: query || undefined, category: query ? undefined : category, limit: 12 })
   const items = data?.items.filter((p) => !exclude.includes(p.slug)) ?? []
 
   return (
@@ -71,6 +68,7 @@ function AddProductPicker({ exclude, category, onPick }: { exclude: string[]; ca
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Search by name, brand or spec" className="input pl-9" aria-label="Search products to add" />
       </div>
+      {!query && category && <p className="mt-2 text-xs text-slate-400">Showing products in the same category. Type to search everything.</p>}
       <div className="-mx-2 mt-3 max-h-80 space-y-0.5 overflow-y-auto">
         {error ? (
           <div className="px-2"><ErrorState compact message={errorMessage(error)} onRetry={reload} /></div>
@@ -95,229 +93,419 @@ function AddProductPicker({ exclude, category, onPick }: { exclude: string[]; ca
   )
 }
 
+function BestBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-navy-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+      <Check className="h-2.5 w-2.5" strokeWidth={3} /> Best
+    </span>
+  )
+}
+
+function SpecNote({ spec }: { spec: SpecComparison }) {
+  if (spec.best.length && spec.reason) return <p className="mt-1 text-xs leading-snug text-navy-700">{spec.reason}</p>
+  if (spec.not_compared) return <p className="mt-1 text-xs leading-snug text-slate-400">{spec.not_compared}</p>
+  return null
+}
+
+function ProsCons({ analysis, kind }: { analysis?: ProductAnalysis; kind: 'pro' | 'con' }) {
+  const items = (kind === 'pro' ? analysis?.advantages : analysis?.disadvantages) ?? []
+  if (!items.length) {
+    return <p className="text-sm text-slate-400">{kind === 'pro' ? 'No clear advantages here' : 'No clear disadvantages here'}</p>
+  }
+  return (
+    <ul className="space-y-1.5">
+      {items.map((t) => (
+        <li key={t} className="flex gap-2 text-sm leading-snug text-slate-700">
+          {kind === 'pro' ? <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={2.5} /> : <Minus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-500" strokeWidth={2.5} />}
+          {t}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Product selection slots
+// ---------------------------------------------------------------------------
+function SelectionSlots({ products, analysis, leader, loading, pendingCount, onRemove, onAdd }: {
+  products: Product[]
+  analysis: Map<string, ProductAnalysis>
+  leader: string | null
+  loading: boolean
+  pendingCount: number
+  onRemove: (slug: string) => void
+  onAdd: () => void
+}) {
+  const empty = Math.max(0, MAX_COMPARE - products.length - pendingCount)
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {products.map((p) => {
+        const led = analysis.get(p.slug)?.specs_led.length ?? 0
+        return (
+          <div key={p.slug} className={cn('card group relative flex flex-col p-3 transition-shadow hover:shadow-lift', p.slug === leader && 'ring-2 ring-navy-900/80')}>
+            <button onClick={() => onRemove(p.slug)} className="absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center rounded-lg bg-white/90 text-slate-400 shadow-soft ring-1 ring-slate-200 transition hover:text-rose-600" aria-label={`Remove ${p.name} from comparison`} title="Remove">
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <Link to={productPath(p)} className="block h-24 sm:h-28" tabIndex={-1} aria-hidden="true">
+              <ProductThumb category={p.category.slug} imageUrl={p.image_url} alt={p.name} />
+            </Link>
+            <p className="mt-3 truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">{p.brand} · {p.model}</p>
+            <Link to={productPath(p)} className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900 hover:text-navy-800 sm:text-base">{p.name}</Link>
+            <p className="mt-1 font-semibold text-slate-900">{formatINR(p.price_inr)}</p>
+            <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-2">
+              <VerificationBadge status={p.verification_status} />
+              {products.length > 1 && !loading && (
+                <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', p.slug === leader ? 'bg-navy-900 text-white' : 'bg-slate-100 text-slate-600')}>
+                  {p.slug === leader && <Trophy className="mr-1 inline h-3 w-3 -translate-y-px" />}
+                  Leads {led} {led === 1 ? 'spec' : 'specs'}
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+      {Array.from({ length: pendingCount }).map((_, i) => <Skeleton key={`p${i}`} className="h-56 rounded-2xl" />)}
+      {Array.from({ length: empty }).map((_, i) => (
+        <button
+          key={`e${i}`}
+          onClick={onAdd}
+          className="group flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-white/50 p-4 text-sm text-slate-500 transition hover:border-navy-300 hover:bg-navy-50/40 hover:text-navy-800"
+        >
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 transition group-hover:bg-navy-900 group-hover:text-white">
+            <Plus className="h-5 w-5" />
+          </span>
+          Add product
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
+function SummaryCard({ data }: { data: Comparison }) {
+  const { summary } = data
+  const name = (slug: string | null) => data.products.find((p) => p.slug === slug)?.name
+  return (
+    <section className="card overflow-hidden">
+      <div className="grid lg:grid-cols-[1fr_300px]">
+        <div className="p-5 sm:p-6">
+          <p className="eyebrow">Overall summary</p>
+          <h2 className="mt-2 text-lg font-semibold leading-snug text-slate-900 sm:text-xl">{summary.headline}</h2>
+          {summary.points.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {summary.points.map((p) => (
+                <li key={p} className="flex gap-2.5 text-sm text-slate-600">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-navy-300" />
+                  {p}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="grid grid-cols-1 divide-y divide-slate-100 border-t border-slate-100 bg-slate-50/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y lg:border-l lg:border-t-0">
+          <Stat icon={Trophy} label="Leads most specs" value={name(summary.most_specs_led) ?? 'No single leader'} muted={!summary.most_specs_led} />
+          <Stat icon={Wallet} label="Lowest price" value={name(summary.lowest_price) ?? 'Tie'} muted={!summary.lowest_price} />
+          <Stat icon={Scale} label="Specs with a clear winner" value={`${summary.compared_specs} of ${data.specs.filter((s) => s.values.some((v) => v.display)).length}`} />
+        </div>
+      </div>
+      {summary.notes.length > 0 && (
+        <details className="group border-t border-slate-100 px-5 py-3 sm:px-6">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900">
+            <Info className="h-4 w-4 text-slate-400" />
+            How this was compared · {summary.notes.length} {summary.notes.length === 1 ? 'note' : 'notes'}
+            <span className="ml-auto text-xs text-slate-400 group-open:hidden">Show</span>
+            <span className="ml-auto hidden text-xs text-slate-400 group-open:inline">Hide</span>
+          </summary>
+          <ul className="mt-3 space-y-1.5 pb-1">
+            {summary.notes.map((n) => <li key={n} className="text-sm text-slate-500">• {n}</li>)}
+            <li className="pt-1 text-xs text-slate-400">{data.method}</li>
+          </ul>
+        </details>
+      )}
+    </section>
+  )
+}
+
+function Stat({ icon: Icon, label, value, muted }: { icon: LucideIcon; label: string; value: string; muted?: boolean }) {
+  return (
+    <div className="px-4 py-3.5 lg:px-5">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400"><Icon className="h-3.5 w-3.5" /> <span className="truncate">{label}</span></p>
+      <p className={cn('mt-1 truncate text-sm font-semibold', muted ? 'text-slate-400' : 'text-slate-900')} title={value}>{value}</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Side-by-side table (tablet and desktop)
+// ---------------------------------------------------------------------------
+function ComparisonTable({ data, specs, analysis }: { data: Comparison; specs: SpecComparison[]; analysis: Map<string, ProductAnalysis> }) {
+  const cols = `minmax(170px, 220px) repeat(${data.products.length}, minmax(180px, 1fr))`
+  const valueOf = (spec: SpecComparison, slug: string) => spec.values.find((v) => v.slug === slug)?.display ?? null
+  return (
+    <div className="card hidden overflow-x-auto md:block">
+      <div className="min-w-fit" role="table" aria-label="Side-by-side comparison">
+        <div className="sticky top-0 z-[2] grid border-b border-slate-200 bg-white/95 backdrop-blur" style={{ gridTemplateColumns: cols }} role="row">
+          <div className="sticky left-0 bg-white/95 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400" role="columnheader">Specification</div>
+          {data.products.map((p) => (
+            <div key={p.slug} className="flex items-center gap-2.5 border-l border-slate-100 px-4 py-3" role="columnheader">
+              <ProductThumb category={p.category.slug} imageUrl={p.image_url} size="sm" className="h-9 w-9 rounded-lg" />
+              <Link to={productPath(p)} className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900 hover:text-navy-800">{p.name}</Link>
+            </div>
+          ))}
+        </div>
+
+        {specs.map((spec) => {
+          const Icon = specIcons[spec.key]
+          return (
+            <div key={spec.key} className="grid border-b border-slate-100 transition-colors hover:bg-slate-50/40" style={{ gridTemplateColumns: cols }} role="row">
+              <div className="sticky left-0 z-[1] bg-white/95 px-5 py-4 backdrop-blur" role="rowheader">
+                <p className="flex items-center gap-2 text-sm font-medium text-slate-700"><Icon className="h-4 w-4 text-slate-400" /> {spec.label}</p>
+                <SpecNote spec={spec} />
+              </div>
+              {data.products.map((p) => {
+                const value = valueOf(spec, p.slug)
+                const best = spec.best.includes(p.slug)
+                return (
+                  <div key={p.slug} className={cn('flex items-start gap-2 border-l border-slate-100 px-4 py-4 text-sm', best ? 'bg-navy-50/60' : '')} role="cell">
+                    <span className={cn('flex-1', spec.key === 'price' && 'text-base font-semibold', value ? 'text-slate-900' : 'text-slate-400', best && 'font-semibold text-navy-950')}>
+                      {value ?? 'Not listed'}
+                    </span>
+                    {best && <BestBadge />}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+
+        {(['pro', 'con'] as const).map((kind) => (
+          <div key={kind} className={cn('grid', kind === 'pro' && 'border-b border-slate-100')} style={{ gridTemplateColumns: cols }} role="row">
+            <div className="sticky left-0 z-[1] bg-white/95 px-5 py-4 backdrop-blur" role="rowheader">
+              <p className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                {kind === 'pro' ? <ThumbsUp className="h-4 w-4 text-emerald-600" /> : <ThumbsDown className="h-4 w-4 text-rose-500" />}
+                {kind === 'pro' ? 'Advantages' : 'Disadvantages'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">Compared with the other products here</p>
+            </div>
+            {data.products.map((p) => (
+              <div key={p.slug} className="border-l border-slate-100 px-4 py-4" role="cell">
+                <ProsCons analysis={analysis.get(p.slug)} kind={kind} />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Stacked view (phones)
+// ---------------------------------------------------------------------------
+function ComparisonStack({ data, specs, analysis }: { data: Comparison; specs: SpecComparison[]; analysis: Map<string, ProductAnalysis> }) {
+  const product = (slug: string) => data.products.find((p) => p.slug === slug)!
+  return (
+    <div className="space-y-3 md:hidden">
+      {specs.map((spec) => {
+        const Icon = specIcons[spec.key]
+        return (
+          <section key={spec.key} className="card p-4">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon className="h-4 w-4 text-slate-400" /> {spec.label}</h3>
+            <SpecNote spec={spec} />
+            <ul className="mt-3 divide-y divide-slate-100">
+              {spec.values.map((v) => {
+                const best = spec.best.includes(v.slug)
+                return (
+                  <li key={v.slug} className={cn('-mx-2 flex items-start gap-3 rounded-lg px-2 py-2.5', best && 'bg-navy-50/60')}>
+                    <span className="w-28 shrink-0 truncate text-xs font-medium text-slate-500">{product(v.slug).name}</span>
+                    <span className={cn('flex-1 text-sm', v.display ? 'text-slate-900' : 'text-slate-400', best && 'font-semibold')}>{v.display ?? 'Not listed'}</span>
+                    {best && <BestBadge />}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )
+      })}
+      <h3 className="px-1 pt-3 text-sm font-semibold text-slate-900">Advantages & disadvantages</h3>
+      {data.products.map((p) => (
+        <section key={p.slug} className="card p-4">
+          <p className="font-semibold text-slate-900">{p.name}</p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700"><ThumbsUp className="h-3.5 w-3.5" /> Advantages</p>
+              <ProsCons analysis={analysis.get(p.slug)} kind="pro" />
+            </div>
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-rose-600"><ThumbsDown className="h-3.5 w-3.5" /> Disadvantages</p>
+              <ProsCons analysis={analysis.get(p.slug)} kind="con" />
+            </div>
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page
 // ---------------------------------------------------------------------------
 export default function ComparePage() {
   const [params, setParams] = useSearchParams()
-  const { compareIds, setCompare, saveComparison, notify } = useApp()
-  const fromUrl = params.get('ids')
-  const slugs = fromUrl ? fromUrl.split(',').filter(Boolean).slice(0, MAX_COMPARE) : compareIds
-  const { products: items, missing, loading, error, reload } = useProductsBySlugs(slugs)
-
+  const navigate = useNavigate()
+  const { compareIds: slugs, setCompare, saveComparison, notify } = useApp()
+  const [picking, setPicking] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
   const [diffOnly, setDiffOnly] = useState(false)
 
-  const setSlugs = (next: string[]) => {
-    if (fromUrl) setParams(next.length ? { ids: next.join(',') } : {}, { replace: true })
-    else setCompare(next)
+  // A shared or saved link (?ids=a,b,c) loads those products into the comparison
+  const idsParam = params.get('ids')
+  useEffect(() => {
+    if (idsParam !== null) {
+      setCompare(idsParam.split(',').filter(Boolean))
+      setParams({}, { replace: true })
+    }
+  }, [idsParam, setCompare, setParams])
+
+  const { data, error, loading, reload } = useComparison(slugs)
+  // Only show products that are still selected (instant feedback while a new comparison loads)
+  const shown = data?.products.filter((p) => slugs.includes(p.slug)) ?? []
+  const pendingCount = loading ? slugs.filter((s) => !shown.some((p) => p.slug === s) && !data?.missing.includes(s)).length : 0
+  const analysis = new Map(data?.analysis.map((a) => [a.slug, a]) ?? [])
+  const complete = !!data && !loading && shown.length === data.products.length
+
+  const remove = (slug: string) => setCompare(slugs.filter((s) => s !== slug))
+  const add = (slug: string) => {
+    setCompare([...slugs, slug])
+    setPicking(false)
   }
 
-  const header = (
-    <div>
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Compare products</h1>
-      <p className="mt-1 text-sm text-slate-500">See prices and specifications side by side.</p>
-    </div>
-  )
-
-  if (slugs.length === 0) {
-    return (
-      <div>
-        {header}
-        <div className="mt-8">
-          <EmptyState icon={GitCompareArrows} title="Nothing to compare yet" text="Add two to four products from search results using “Add to compare”." action={<Link to="/app/search" className="btn-primary">Browse products</Link>} />
-        </div>
-      </div>
-    )
-  }
-  if (error) {
-    return <div>{header}<div className="mt-8"><ErrorState title="Couldn’t load these products" message={errorMessage(error)} onRetry={reload} /></div></div>
-  }
-  if (loading) {
-    return (
-      <div>
-        {header}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {slugs.map((s) => <Skeleton key={s} className="h-72 rounded-2xl" />)}
-        </div>
-      </div>
-    )
-  }
-
-  const removeMissing = () => setSlugs(slugs.filter((s) => !missing.includes(s)))
-  if (items.length === 0) {
-    return (
-      <div>
-        {header}
-        <div className="mt-8">
-          <EmptyState icon={GitCompareArrows} title="These products are no longer available" text="They may have been removed from the catalogue." action={<button onClick={() => setSlugs([])} className="btn-primary">Start a new comparison</button>} />
-        </div>
-      </div>
-    )
-  }
-
-  // Highlights computed from the listed specs (not AI)
-  const batteries = items.map((p) => battery(p.specifications?.battery))
-  const batteryUnits = new Set(batteries.filter(Boolean).map((b) => b!.unit))
-  const metrics: Metric[] = [
-    { key: 'price', label: 'Lowest price', icon: Wallet, values: items.map((p) => Number(p.price_inr)), best: 'min', format: (p) => formatINR(p.price_inr) },
-    { key: 'ram', label: 'Most RAM', icon: MemoryStick, values: items.map((p) => sizeInGB(p.specifications?.ram)), best: 'max', format: (p) => p.specifications?.ram ?? '' },
-    { key: 'storage', label: 'Most storage', icon: HardDrive, values: items.map((p) => sizeInGB(p.specifications?.storage)), best: 'max', format: (p) => p.specifications?.storage ?? '' },
-    // Only compare batteries measured in the same unit (mAh for phones, Wh for laptops)
-    { key: 'battery', label: 'Largest battery', icon: Battery, values: batteryUnits.size === 1 ? batteries.map((b) => b?.value) : [], best: 'max', format: (p) => p.specifications?.battery ?? '' },
-  ]
-  const best = Object.fromEntries(metrics.map((m) => [m.key, bestIndexes(m.values, m.best)]))
-  const highlights = metrics.filter((m) => best[m.key].size > 0)
-
-  const specKeys: { key: keyof Specifications; label: string; metric?: string }[] = [
-    { key: 'processor', label: 'Processor' },
-    { key: 'ram', label: 'RAM', metric: 'ram' },
-    { key: 'storage', label: 'Storage', metric: 'storage' },
-    { key: 'battery', label: 'Battery', metric: 'battery' },
-    { key: 'display', label: 'Display' },
-    { key: 'graphics', label: 'Graphics' },
-  ]
-  const visibleSpecs = specKeys.filter((s) => {
-    const values = items.map((p) => p.specifications?.[s.key] ?? null)
-    if (values.every((v) => v === null)) return false // e.g. graphics for phones
-    return !diffOnly || new Set(values).size > 1
+  const visibleSpecs = (data?.specs ?? []).filter((s) => {
+    if (s.values.every((v) => v.display === null)) return false // e.g. graphics for phones
+    return !diffOnly || !allSame(s)
   })
-
-  const categories = new Set(items.map((p) => p.category.slug))
-  const defaultTitle = categories.size > 1 ? 'My comparison' : `${items[0].category.name} comparison`
+  const firstCategory = shown[0]?.category.slug
+  const sameCategory = shown.every((p) => p.category.slug === firstCategory)
+  const defaultTitle = !sameCategory || !shown.length ? 'My comparison' : `${shown[0].category.name} comparison`
 
   const submitSave = (e: FormEvent) => {
     e.preventDefault()
-    saveComparison(title.trim() || defaultTitle, items.map((p) => p.slug))
+    saveComparison(title.trim() || defaultTitle, shown.map((p) => p.slug))
     setSaving(false)
     setTitle('')
   }
-
   const copyLink = async () => {
-    const url = `${window.location.origin}/app/compare?ids=${items.map((p) => p.slug).join(',')}`
     try {
-      await navigator.clipboard.writeText(url)
+      await navigator.clipboard.writeText(`${window.location.origin}/app/compare?ids=${slugs.join(',')}`)
       notify('Link copied to clipboard')
     } catch {
       notify('Could not copy the link')
     }
   }
 
-  const cols = `minmax(130px,170px) repeat(${items.length}, minmax(200px, 1fr))`
-
   return (
-    <div>
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Compare products</h1>
-          <p className="mt-1 text-sm text-slate-500">{items.length} of {MAX_COMPARE} products · best values highlighted</p>
+          <p className="mt-1 text-sm text-slate-500">Choose up to {MAX_COMPARE} products to see their specs side by side.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={copyLink} className="btn-secondary"><Link2 className="h-4 w-4" /> Copy link</button>
-          <button onClick={() => setSaving(true)} disabled={items.length < 2} className="btn-primary"><Bookmark className="h-4 w-4" /> Save comparison</button>
-        </div>
+        {slugs.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button onClick={copyLink} className="btn-secondary"><Link2 className="h-4 w-4" /> <span className="hidden sm:inline">Copy link</span></button>
+            <button onClick={() => setCompare([])} className="btn-secondary"><Trash2 className="h-4 w-4" /> <span className="hidden sm:inline">Clear all</span></button>
+            <button onClick={() => setSaving(true)} disabled={shown.length < 2} className="btn-primary"><Bookmark className="h-4 w-4" /> Save</button>
+          </div>
+        )}
       </div>
 
-      {missing.length > 0 && (
-        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <Info className="h-4 w-4 shrink-0" />
-          <span className="flex-1">{missing.length} product{missing.length > 1 ? 's are' : ' is'} no longer in the catalogue and {missing.length > 1 ? 'were' : 'was'} left out.</span>
-          <button onClick={removeMissing} className="font-medium underline-offset-2 hover:underline">Remove from list</button>
-        </div>
-      )}
-      {categories.size > 1 && (
-        <div className="mt-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-          <Info className="h-4 w-4 shrink-0 text-slate-400" /> You’re comparing products from different categories, so some specs won’t line up.
-        </div>
-      )}
-      {items.length === 1 && (
-        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Add at least one more product to compare.</div>
-      )}
-
-      {highlights.length > 0 && (
-        <div className="card mt-6 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
-            <h2 className="text-sm font-semibold text-slate-900">Highlights</h2>
-            <span className="text-xs text-slate-400">Calculated from the listed specs</span>
-          </div>
-          <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
-            {highlights.map((m) => {
-              const winners = [...best[m.key]].map((i) => items[i])
-              return (
-                <div key={m.key} className="p-5">
-                  <p className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500"><m.icon className="h-3.5 w-3.5 text-navy-700" /> {m.label}</p>
-                  <p className="mt-2 font-semibold text-slate-900">{winners.map((p) => p.name).join(', ')}</p>
-                  <p className="mt-0.5 text-sm text-slate-500">{m.format(winners[0])}</p>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 flex items-center">
-        <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm text-slate-600">
-          <button role="switch" aria-checked={diffOnly} onClick={() => setDiffOnly((d) => !d)} className={cn('relative h-5 w-9 rounded-full transition-colors', diffOnly ? 'bg-navy-900' : 'bg-slate-300')}>
-            <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', diffOnly ? 'left-[18px]' : 'left-0.5')} />
-          </button>
-          Show differences only
-        </label>
-      </div>
-
-      <div className="card mt-3 overflow-x-auto">
-        <div className="min-w-fit">
-          <div className="grid border-b border-slate-100" style={{ gridTemplateColumns: cols }}>
-            <div className="flex items-end p-4">
-              {items.length < MAX_COMPARE && (
-                <button onClick={() => setAdding(true)} className="btn-secondary w-full py-2 text-xs"><Plus className="h-3.5 w-3.5" /> Add product</button>
-              )}
+      {/* Nothing selected */}
+      {slugs.length === 0 ? (
+        <EmptyState
+          icon={GitCompareArrows}
+          title="Pick products to compare"
+          text="Add two to four products. You can add them here, or use “Add to compare” on any product in search."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <button onClick={() => setPicking(true)} className="btn-primary"><Plus className="h-4 w-4" /> Add product</button>
+              <button onClick={() => navigate('/app/search')} className="btn-secondary">Browse products</button>
             </div>
-            {items.map((p) => (
-              <div key={p.slug} className="relative border-l border-slate-100 p-4">
-                <button onClick={() => setSlugs(slugs.filter((x) => x !== p.slug))} className="absolute right-3 top-3 z-10 grid h-7 w-7 place-items-center rounded-lg bg-white/80 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label={`Remove ${p.name}`}>
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                <Link to={productPath(p)} className="block h-28"><ProductThumb category={p.category.slug} imageUrl={p.image_url} alt={p.name} /></Link>
-                <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-400">{p.brand} · {p.model}</p>
-                <Link to={productPath(p)} className="font-semibold leading-snug text-slate-900 hover:text-navy-800">{p.name}</Link>
-                <div className="mt-2"><VerificationBadge status={p.verification_status} /></div>
-              </div>
-            ))}
-          </div>
+          }
+        />
+      ) : error ? (
+        <ErrorState title="Couldn’t compare these products" message={errorMessage(error)} onRetry={reload} />
+      ) : (
+        <>
+          <SelectionSlots
+            products={shown}
+            analysis={analysis}
+            leader={complete ? data!.summary.most_specs_led : null}
+            loading={!complete}
+            pendingCount={pendingCount}
+            onRemove={remove}
+            onAdd={() => setPicking(true)}
+          />
 
-          <Row label="Price" cols={cols}>
-            {items.map((p, i) => <Cell key={p.slug} best={best.price.has(i)}><span className="text-base font-semibold">{formatINR(p.price_inr)}</span></Cell>)}
-          </Row>
-          {!diffOnly && (
-            <Row label="Category" cols={cols}>
-              {items.map((p) => <Cell key={p.slug}>{p.category.name}</Cell>)}
-            </Row>
+          {data && data.missing.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <Info className="h-4 w-4 shrink-0" />
+              <span className="flex-1">{data.missing.length} selected product{data.missing.length > 1 ? 's are' : ' is'} no longer in the catalogue.</span>
+              <button onClick={() => setCompare(slugs.filter((s) => !data.missing.includes(s)))} className="font-medium underline-offset-2 hover:underline">Remove</button>
+            </div>
           )}
-          {visibleSpecs.map((s) => (
-            <Row key={s.key} label={s.label} cols={cols}>
-              {items.map((p, i) => (
-                <Cell key={p.slug} best={s.metric ? best[s.metric].has(i) : false}>
-                  {p.specifications?.[s.key] ?? <Minus className="h-4 w-4 text-slate-300" aria-label="Not listed" />}
-                </Cell>
-              ))}
-            </Row>
-          ))}
-          {diffOnly && visibleSpecs.length === 0 && <p className="border-b border-slate-100 px-4 py-4 text-sm text-slate-500">These products have identical listed specs.</p>}
-          <Row label="Last verified" cols={cols} last>
-            {items.map((p) => <Cell key={p.slug}><span className="text-slate-500">{p.last_verified_date ?? (p.is_demo ? 'Demo data' : 'Not verified')}</span></Cell>)}
-          </Row>
-        </div>
-      </div>
-      {items.some((p) => p.is_demo) && (
-        <p className="mt-3 text-xs text-slate-400">Products marked “Demo data” are fictional samples — their specs and prices are not real-world information.</p>
+
+          {!data ? (
+            <div className="space-y-4">
+              <Skeleton className="h-40 rounded-2xl" />
+              <Skeleton className="h-96 rounded-2xl" />
+            </div>
+          ) : shown.length < 2 ? (
+            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-soft">
+              <Info className="h-4 w-4 shrink-0 text-navy-600" />
+              Add at least one more product to see the side-by-side comparison.
+            </div>
+          ) : (
+            <div className={cn('space-y-6 transition-opacity', !complete && 'pointer-events-none opacity-50')}>
+              <SummaryCard data={data} />
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-slate-900">Side-by-side comparison</h2>
+                <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm text-slate-600">
+                  <button role="switch" aria-checked={diffOnly} onClick={() => setDiffOnly((d) => !d)} className={cn('relative h-5 w-9 rounded-full transition-colors', diffOnly ? 'bg-navy-900' : 'bg-slate-300')}>
+                    <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', diffOnly ? 'left-[18px]' : 'left-0.5')} />
+                  </button>
+                  Differences only
+                </label>
+              </div>
+
+              <ComparisonTable data={data} specs={visibleSpecs} analysis={analysis} />
+              <ComparisonStack data={data} specs={visibleSpecs} analysis={analysis} />
+
+              <p className="flex items-start gap-2 text-xs text-slate-400">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                “Best” is shown only when every product lists that spec in a comparable form and the values differ. {data.method}
+                {data.products.some((p) => p.is_demo) && ' Products marked “Demo data” are fictional samples.'}
+              </p>
+            </div>
+          )}
+        </>
       )}
 
+      {picking && (
+        <Modal title="Add a product" onClose={() => setPicking(false)}>
+          <ProductPicker exclude={slugs} category={firstCategory} onPick={add} />
+        </Modal>
+      )}
       {saving && (
         <Modal title="Save comparison" onClose={() => setSaving(false)}>
           <form onSubmit={submitSave}>
             <label htmlFor="cmp-title" className="label">Name</label>
             <input id="cmp-title" autoFocus className="input" placeholder={defaultTitle} value={title} onChange={(e) => setTitle(e.target.value)} />
-            <p className="mt-2 text-xs text-slate-500">{items.map((p) => p.name).join(' · ')}</p>
+            <p className="mt-2 text-xs text-slate-500">{shown.map((p) => p.name).join(' · ')}</p>
             <div className="mt-6 flex justify-end gap-2">
               <button type="button" onClick={() => setSaving(false)} className="btn-ghost">Cancel</button>
               <button type="submit" className="btn-primary">Save</button>
@@ -325,36 +513,6 @@ export default function ComparePage() {
           </form>
         </Modal>
       )}
-      {adding && (
-        <Modal title="Add a product" onClose={() => setAdding(false)}>
-          <AddProductPicker
-            exclude={slugs}
-            category={categories.size === 1 ? items[0].category.slug : undefined}
-            onPick={(slug) => {
-              setSlugs([...slugs, slug])
-              setAdding(false)
-            }}
-          />
-        </Modal>
-      )}
-    </div>
-  )
-}
-
-function Row({ label, cols, children, last }: { label: string; cols: string; children: ReactNode; last?: boolean }) {
-  return (
-    <div className={cn('grid transition-colors hover:bg-slate-50/50', !last && 'border-b border-slate-100')} style={{ gridTemplateColumns: cols }}>
-      <div className="sticky left-0 z-[1] bg-white/95 px-4 py-3.5 text-sm font-medium text-slate-500 backdrop-blur">{label}</div>
-      {children}
-    </div>
-  )
-}
-
-function Cell({ children, best }: { children: ReactNode; best?: boolean }) {
-  return (
-    <div className={cn('flex items-start gap-2 border-l border-slate-100 px-4 py-3.5 text-sm text-slate-800', best && 'bg-navy-50/50')}>
-      <div className="flex-1">{children}</div>
-      {best && <span className="shrink-0 rounded bg-navy-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Best</span>}
     </div>
   )
 }

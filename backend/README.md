@@ -110,6 +110,7 @@ Use `include_demo=false` on list/search to hide demo products.
 | PATCH  | `/api/products/{id}`            | Update some fields                              |
 | DELETE | `/api/products/{id}`            | Delete a product                                |
 | GET    | `/api/products/import/template` | Download a CSV template                         |
+| GET    | `/api/compare?products=a&products=b` | Rule-based comparison of 1–4 products       |
 | POST   | `/api/products/import`          | Import products from a CSV file                 |
 
 **Filters** (list and search): `category`, `brand` (repeat for several:
@@ -133,6 +134,31 @@ match somewhere, so `q=oled 120` finds products whose specs mention both "OLED" 
 - `dry_run=true` checks the file without saving anything
 - Limits: UTF-8, 2 MB, 1,000 rows
 
+## Product comparison
+
+`GET /api/compare?products=<slug>&products=<slug>` compares 1–4 products using
+plain Python rules (no AI). It returns every product, a row per spec (price,
+processor, RAM, storage, battery, display, graphics), advantages and
+disadvantages per product, and an overall summary.
+
+**When is a product marked “best”?** Only when the data supports it:
+
+- every compared product lists the spec in a readable form (otherwise: “Not listed for …”),
+- the values can be compared fairly — same product type, same unit (mAh vs Wh isn’t compared),
+- the values actually differ (otherwise: “The listed values are the same…”).
+
+Specs made of several numbers need a product to be at least as good on **every**
+measure: processor (core count, clock speed), display (refresh rate, resolution)
+and graphics (dedicated vs integrated, graphics memory). If one product has more
+cores and another a higher clock speed, the result is “No clear winner” with the
+trade-off explained. Measures missing for some products are skipped and noted.
+
+Advantages and disadvantages are relative to the products being compared
+(“Most RAM (32 GB)”, “Highest price (₹80,000 more than the cheapest)”), plus
+display panel types (OLED, Mini-LED) when not every product has one.
+The parsing lives in `app/services/spec_parser.py` and the rules in
+`app/services/comparison_service.py`.
+
 ## Test with Swagger UI
 
 Open **http://localhost:8000/docs** (http://localhost:8000 redirects there).
@@ -147,7 +173,8 @@ For each endpoint: expand it → **Try it out** → fill in the fields → **Exe
 7. **POST /api/products/import** — click **Choose File**, pick
    `data/sample_products_demo.csv`, set `dry_run` to `true` first to preview,
    then run it again with `dry_run` = `false`.
-8. Send bad data (e.g. `"price_inr": -1`) to see a `422` validation error.
+8. **GET /api/compare** — add `halcyon-vs16-26` and `ironpeak-fg15-26` as `products` and check the `specs`, `analysis` and `summary`.
+9. Send bad data (e.g. `"price_inr": -1`) to see a `422` validation error.
 
 An alternative documentation view is at http://localhost:8000/redoc.
 
