@@ -1,54 +1,67 @@
-import { Bookmark, Check, GitCompareArrows, Plus } from 'lucide-react'
-import type { Product } from '../data/demo'
+import { Link } from 'react-router-dom'
+import { Bookmark, Cpu, GitCompareArrows, HardDrive, MemoryStick, Plus } from 'lucide-react'
+import type { Product } from '../types/api'
 import { useApp } from '../context/AppContext'
-import { cn, formatPrice } from '../lib/format'
-import { ProductThumb, Rating, ScoreBadge } from './ui'
+import { cn, formatINR } from '../lib/format'
+import { ProductThumb, VerificationBadge } from './ui'
 
-export function ProductCard({ product, reasons, compact = false }: { product: Product; reasons?: string[]; compact?: boolean }) {
+export function productPath(product: Pick<Product, 'slug'>) {
+  return `/app/products/${product.slug}`
+}
+
+export function ProductCard({ product, compact = false }: { product: Product; compact?: boolean }) {
   const { compareIds, toggleCompare, savedProductIds, toggleSavedProduct } = useApp()
-  const inCompare = compareIds.includes(product.id)
-  const saved = savedProductIds.includes(product.id)
+  const inCompare = compareIds.includes(product.slug)
+  const saved = savedProductIds.includes(product.slug)
+  const specs = product.specifications
+  const keySpecs = [
+    { icon: Cpu, value: specs?.processor },
+    { icon: MemoryStick, value: specs?.ram && `${specs.ram} RAM` },
+    { icon: HardDrive, value: specs?.storage },
+  ].filter((s) => s.value)
 
   return (
-    <article className="card group flex flex-col overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lift">
-      <div className={cn('relative p-3', compact ? 'h-32' : 'h-40')}>
-        <ProductThumb category={product.category} />
-        <button
-          onClick={() => toggleSavedProduct(product.id)}
-          aria-label={saved ? 'Remove from saved' : 'Save product'}
-          aria-pressed={saved}
-          className={cn(
-            'absolute right-5 top-5 grid h-8 w-8 place-items-center rounded-lg border bg-white/90 backdrop-blur transition',
-            saved ? 'border-navy-200 text-navy-800' : 'border-slate-200 text-slate-400 hover:text-slate-700',
-          )}
-        >
-          <Bookmark className={cn('h-4 w-4', saved && 'fill-navy-800')} />
-        </button>
-      </div>
+    <article className="card group relative flex flex-col overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lift">
+      <Link to={productPath(product)} className={cn('block p-3', compact ? 'h-32' : 'h-40')} tabIndex={-1} aria-hidden="true">
+        <ProductThumb category={product.category.slug} imageUrl={product.image_url} alt={product.name} />
+      </Link>
+      <button
+        onClick={() => toggleSavedProduct(product.slug)}
+        aria-label={saved ? `Remove ${product.name} from saved` : `Save ${product.name}`}
+        aria-pressed={saved}
+        className={cn(
+          'absolute right-5 top-5 grid h-8 w-8 place-items-center rounded-lg border bg-white/90 backdrop-blur transition',
+          saved ? 'border-navy-200 text-navy-800' : 'border-slate-200 text-slate-400 hover:text-slate-700',
+        )}
+      >
+        <Bookmark className={cn('h-4 w-4', saved && 'fill-navy-800')} />
+      </button>
       <div className="flex flex-1 flex-col px-4 pb-4">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{product.brand}</p>
-          <ScoreBadge score={product.score} />
+          <p className="truncate text-xs font-medium uppercase tracking-wide text-slate-400">
+            {product.brand} · {product.model}
+          </p>
+          <VerificationBadge status={product.verification_status} />
         </div>
-        <h3 className="mt-1 font-semibold leading-snug text-slate-900">{product.name}</h3>
-        {!compact && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{product.tagline}</p>}
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-lg font-semibold tracking-tight text-slate-900">{formatPrice(product.price)}</span>
-          <Rating value={product.rating} reviews={compact ? undefined : product.reviews} />
-        </div>
-        {reasons && reasons.length > 0 && (
-          <ul className="mt-3 space-y-1.5 border-t border-slate-100 pt-3">
-            {reasons.slice(0, 2).map((r) => (
-              <li key={r} className="flex items-start gap-2 text-xs text-slate-600">
-                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-navy-600" />
-                {r}
+        <h3 className="mt-1 font-semibold leading-snug text-slate-900">
+          <Link to={productPath(product)} className="rounded transition hover:text-navy-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
+            {product.name}
+          </Link>
+        </h3>
+        {!compact && keySpecs.length > 0 && (
+          <ul className="mt-2.5 space-y-1">
+            {keySpecs.map(({ icon: Icon, value }) => (
+              <li key={value} className="flex items-center gap-2 text-xs text-slate-500">
+                <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span className="truncate">{value}</span>
               </li>
             ))}
           </ul>
         )}
+        <p className="mt-3 text-lg font-semibold tracking-tight text-slate-900">{formatINR(product.price_inr)}</p>
         <div className="mt-auto pt-4">
           <button
-            onClick={() => toggleCompare(product.id)}
+            onClick={() => toggleCompare(product.slug)}
             aria-pressed={inCompare}
             className={cn('w-full', inCompare ? 'btn border border-navy-200 bg-navy-50 text-navy-900 hover:bg-navy-100' : 'btn-secondary')}
           >

@@ -1,12 +1,44 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Award, Bookmark, Check, GitCompareArrows, Link2, Minus, Plus, Sparkles, Trophy, Wallet, X } from 'lucide-react'
+import { Battery, Bookmark, GitCompareArrows, HardDrive, Info, Link2, MemoryStick, Minus, Plus, Search, Wallet, X } from 'lucide-react'
 import { MAX_COMPARE, useApp } from '../context/AppContext'
-import { DemoBadge, EmptyState, ProductThumb, Rating } from '../components/ui'
-import { getCategory, getProduct, products, type Product } from '../data/demo'
-import { cn, formatPrice } from '../lib/format'
+import { useProducts, useProductsBySlugs } from '../hooks/useApi'
+import { errorMessage } from '../lib/api'
+import { cn, formatINR } from '../lib/format'
+import { productPath } from '../components/ProductCard'
+import { EmptyState, ErrorState, ProductThumb, Skeleton, VerificationBadge } from '../components/ui'
+import type { Product, Specifications } from '../types/api'
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+// ---------------------------------------------------------------------------
+// Parse comparable numbers out of spec text ("16 GB LPDDR5" → 16, "1 TB SSD" → 1024)
+// ---------------------------------------------------------------------------
+function sizeInGB(text: string | null | undefined): number | undefined {
+  const m = text?.match(/(\d+(?:\.\d+)?)\s*(TB|GB)/i)
+  if (!m) return undefined
+  return parseFloat(m[1]) * (m[2].toUpperCase() === 'TB' ? 1024 : 1)
+}
+
+function battery(text: string | null | undefined): { value: number; unit: string } | undefined {
+  const m = text?.replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(mAh|Wh)/i)
+  return m ? { value: parseFloat(m[1]), unit: m[2].toLowerCase() } : undefined
+}
+
+type Metric = { key: string; label: string; icon: typeof Wallet; values: (number | undefined)[]; best: 'min' | 'max'; format: (p: Product) => string }
+
+function bestIndexes(values: (number | undefined)[], best: 'min' | 'max'): Set<number> {
+  const nums = values.filter((v): v is number => v !== undefined)
+  if (nums.length < 2 || new Set(nums).size < 2) return new Set() // nothing to compare, or all equal
+  const target = best === 'min' ? Math.min(...nums) : Math.max(...nums)
+  return new Set(values.flatMap((v, i) => (v === target ? [i] : [])))
+}
+
+// ---------------------------------------------------------------------------
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="animate-fade-in absolute inset-0 bg-slate-900/30 backdrop-blur-sm" onClick={onClose} />
@@ -23,81 +55,162 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
+function AddProductPicker({ exclude, category, onPick }: { exclude: string[]; category?: string; onPick: (slug: string) => void }) {
+  const [text, setText] = useState('')
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const t = window.setTimeout(() => setQuery(text.trim()), 250)
+    return () => window.clearTimeout(t)
+  }, [text])
+  const { data, loading, error, reload } = useProducts({ q: query || undefined, category: query ? undefined : category, limit: 10 })
+  const items = data?.items.filter((p) => !exclude.includes(p.slug)) ?? []
+
+  return (
+    <div>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Search by name, brand or spec" className="input pl-9" aria-label="Search products to add" />
+      </div>
+      <div className="-mx-2 mt-3 max-h-80 space-y-0.5 overflow-y-auto">
+        {error ? (
+          <div className="px-2"><ErrorState compact message={errorMessage(error)} onRetry={reload} /></div>
+        ) : loading && !data ? (
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="mx-2 my-2 h-10" />)
+        ) : items.length === 0 ? (
+          <p className="px-2 py-6 text-center text-sm text-slate-500">No products found.</p>
+        ) : (
+          items.map((p) => (
+            <button key={p.slug} onClick={() => onPick(p.slug)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-slate-50">
+              <ProductThumb category={p.category.slug} imageUrl={p.image_url} size="sm" className="h-10 w-10" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-slate-900">{p.name}</p>
+                <p className="text-xs text-slate-500">{p.brand} · {p.category.name} · {formatINR(p.price_inr)}</p>
+              </div>
+              <Plus className="h-4 w-4 text-slate-400" />
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 export default function ComparePage() {
   const [params, setParams] = useSearchParams()
   const { compareIds, setCompare, saveComparison, notify } = useApp()
   const fromUrl = params.get('ids')
-  const ids = fromUrl ? fromUrl.split(',').filter(Boolean).slice(0, MAX_COMPARE) : compareIds
-  const items = ids.map(getProduct).filter((p): p is Product => !!p)
+  const slugs = fromUrl ? fromUrl.split(',').filter(Boolean).slice(0, MAX_COMPARE) : compareIds
+  const { products: items, missing, loading, error, reload } = useProductsBySlugs(slugs)
 
   const [saving, setSaving] = useState(false)
   const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
   const [diffOnly, setDiffOnly] = useState(false)
 
-  const setIds = (next: string[]) => {
+  const setSlugs = (next: string[]) => {
     if (fromUrl) setParams(next.length ? { ids: next.join(',') } : {}, { replace: true })
     else setCompare(next)
   }
 
-  const specKeys = useMemo(() => Array.from(new Set(items.flatMap((p) => Object.keys(p.specs)))), [items])
-  const visibleKeys = diffOnly ? specKeys.filter((k) => new Set(items.map((p) => p.specs[k] ?? '—')).size > 1) : specKeys
+  const header = (
+    <div>
+      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Compare products</h1>
+      <p className="mt-1 text-sm text-slate-500">See prices and specifications side by side.</p>
+    </div>
+  )
 
-  if (items.length === 0) {
+  if (slugs.length === 0) {
     return (
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Compare products</h1>
-        <p className="mt-1 text-sm text-slate-500">See specs, pros and cons side by side.</p>
+        {header}
         <div className="mt-8">
-          <EmptyState
-            icon={GitCompareArrows}
-            title="Nothing to compare yet"
-            text="Add two to four products from search results using “Add to compare”."
-            action={<Link to="/app/search" className="btn-primary">Browse products</Link>}
-          />
+          <EmptyState icon={GitCompareArrows} title="Nothing to compare yet" text="Add two to four products from search results using “Add to compare”." action={<Link to="/app/search" className="btn-primary">Browse products</Link>} />
+        </div>
+      </div>
+    )
+  }
+  if (error) {
+    return <div>{header}<div className="mt-8"><ErrorState title="Couldn’t load these products" message={errorMessage(error)} onRetry={reload} /></div></div>
+  }
+  if (loading) {
+    return (
+      <div>
+        {header}
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {slugs.map((s) => <Skeleton key={s} className="h-72 rounded-2xl" />)}
         </div>
       </div>
     )
   }
 
-  const best = {
-    price: Math.min(...items.map((p) => p.price)),
-    rating: Math.max(...items.map((p) => p.rating)),
-    score: Math.max(...items.map((p) => p.score)),
+  const removeMissing = () => setSlugs(slugs.filter((s) => !missing.includes(s)))
+  if (items.length === 0) {
+    return (
+      <div>
+        {header}
+        <div className="mt-8">
+          <EmptyState icon={GitCompareArrows} title="These products are no longer available" text="They may have been removed from the catalogue." action={<button onClick={() => setSlugs([])} className="btn-primary">Start a new comparison</button>} />
+        </div>
+      </div>
+    )
   }
-  const overall = items.reduce((a, b) => (b.score > a.score ? b : a))
-  const value = items.reduce((a, b) => (b.score / b.price > a.score / a.price ? b : a))
-  const budget = items.reduce((a, b) => (b.price < a.price ? b : a))
-  const mixedCategories = new Set(items.map((p) => p.category)).size > 1
-  const defaultTitle = mixedCategories ? 'My comparison' : `${getCategory(items[0].category).name} comparison`
 
-  const candidates = products.filter((p) => !ids.includes(p.id)).sort((a, b) => Number(b.category === items[0].category) - Number(a.category === items[0].category))
+  // Highlights computed from the listed specs (not AI)
+  const batteries = items.map((p) => battery(p.specifications?.battery))
+  const batteryUnits = new Set(batteries.filter(Boolean).map((b) => b!.unit))
+  const metrics: Metric[] = [
+    { key: 'price', label: 'Lowest price', icon: Wallet, values: items.map((p) => Number(p.price_inr)), best: 'min', format: (p) => formatINR(p.price_inr) },
+    { key: 'ram', label: 'Most RAM', icon: MemoryStick, values: items.map((p) => sizeInGB(p.specifications?.ram)), best: 'max', format: (p) => p.specifications?.ram ?? '' },
+    { key: 'storage', label: 'Most storage', icon: HardDrive, values: items.map((p) => sizeInGB(p.specifications?.storage)), best: 'max', format: (p) => p.specifications?.storage ?? '' },
+    // Only compare batteries measured in the same unit (mAh for phones, Wh for laptops)
+    { key: 'battery', label: 'Largest battery', icon: Battery, values: batteryUnits.size === 1 ? batteries.map((b) => b?.value) : [], best: 'max', format: (p) => p.specifications?.battery ?? '' },
+  ]
+  const best = Object.fromEntries(metrics.map((m) => [m.key, bestIndexes(m.values, m.best)]))
+  const highlights = metrics.filter((m) => best[m.key].size > 0)
+
+  const specKeys: { key: keyof Specifications; label: string; metric?: string }[] = [
+    { key: 'processor', label: 'Processor' },
+    { key: 'ram', label: 'RAM', metric: 'ram' },
+    { key: 'storage', label: 'Storage', metric: 'storage' },
+    { key: 'battery', label: 'Battery', metric: 'battery' },
+    { key: 'display', label: 'Display' },
+    { key: 'graphics', label: 'Graphics' },
+  ]
+  const visibleSpecs = specKeys.filter((s) => {
+    const values = items.map((p) => p.specifications?.[s.key] ?? null)
+    if (values.every((v) => v === null)) return false // e.g. graphics for phones
+    return !diffOnly || new Set(values).size > 1
+  })
+
+  const categories = new Set(items.map((p) => p.category.slug))
+  const defaultTitle = categories.size > 1 ? 'My comparison' : `${items[0].category.name} comparison`
 
   const submitSave = (e: FormEvent) => {
     e.preventDefault()
-    saveComparison(title.trim() || defaultTitle, items.map((p) => p.id))
+    saveComparison(title.trim() || defaultTitle, items.map((p) => p.slug))
     setSaving(false)
     setTitle('')
   }
 
   const copyLink = async () => {
-    const url = `${window.location.origin}/app/compare?ids=${items.map((p) => p.id).join(',')}`
+    const url = `${window.location.origin}/app/compare?ids=${items.map((p) => p.slug).join(',')}`
     try {
       await navigator.clipboard.writeText(url)
       notify('Link copied to clipboard')
     } catch {
-      notify('Could not copy link')
+      notify('Could not copy the link')
     }
   }
 
-  const cols = `minmax(140px,180px) repeat(${items.length}, minmax(200px, 1fr))`
+  const cols = `minmax(130px,170px) repeat(${items.length}, minmax(200px, 1fr))`
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Compare products</h1>
-          <p className="mt-1 text-sm text-slate-500">{items.length} of {MAX_COMPARE} products · differences highlighted</p>
+          <p className="mt-1 text-sm text-slate-500">{items.length} of {MAX_COMPARE} products · best values highlighted</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={copyLink} className="btn-secondary"><Link2 className="h-4 w-4" /> Copy link</button>
@@ -105,54 +218,54 @@ export default function ComparePage() {
         </div>
       </div>
 
-      {/* AI verdict */}
-      {items.length >= 2 && (
+      {missing.length > 0 && (
+        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <Info className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{missing.length} product{missing.length > 1 ? 's are' : ' is'} no longer in the catalogue and {missing.length > 1 ? 'were' : 'was'} left out.</span>
+          <button onClick={removeMissing} className="font-medium underline-offset-2 hover:underline">Remove from list</button>
+        </div>
+      )}
+      {categories.size > 1 && (
+        <div className="mt-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <Info className="h-4 w-4 shrink-0 text-slate-400" /> You’re comparing products from different categories, so some specs won’t line up.
+        </div>
+      )}
+      {items.length === 1 && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Add at least one more product to compare.</div>
+      )}
+
+      {highlights.length > 0 && (
         <div className="card mt-6 overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-navy-700" />
-              <h2 className="text-sm font-semibold text-slate-900">Siftwell verdict</h2>
-            </div>
-            <DemoBadge label="Simulated AI" />
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
+            <h2 className="text-sm font-semibold text-slate-900">Highlights</h2>
+            <span className="text-xs text-slate-400">Calculated from the listed specs</span>
           </div>
-          <div className="grid divide-y divide-slate-100 md:grid-cols-3 md:divide-x md:divide-y-0">
-            {[
-              { icon: Trophy, label: 'Best overall', p: overall, why: `Highest match score (${overall.score}%) for your needs.` },
-              { icon: Award, label: 'Best value', p: value, why: `Most match score per dollar at ${formatPrice(value.price)}.` },
-              { icon: Wallet, label: 'Budget pick', p: budget, why: `Lowest price — ${formatPrice(items.reduce((s, p) => Math.max(s, p.price), 0) - budget.price)} less than the priciest option.` },
-            ].map(({ icon: Icon, label, p, why }) => (
-              <div key={label} className="p-5">
-                <p className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500"><Icon className="h-3.5 w-3.5 text-navy-700" /> {label}</p>
-                <p className="mt-2 font-semibold text-slate-900">{p.name}</p>
-                <p className="mt-1 text-sm text-slate-500">{why}</p>
-              </div>
-            ))}
+          <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
+            {highlights.map((m) => {
+              const winners = [...best[m.key]].map((i) => items[i])
+              return (
+                <div key={m.key} className="p-5">
+                  <p className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500"><m.icon className="h-3.5 w-3.5 text-navy-700" /> {m.label}</p>
+                  <p className="mt-2 font-semibold text-slate-900">{winners.map((p) => p.name).join(', ')}</p>
+                  <p className="mt-0.5 text-sm text-slate-500">{m.format(winners[0])}</p>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {items.length === 1 && (
-        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Add at least one more product to see a full comparison and verdict.</div>
-      )}
-
-      <div className="mt-6 flex items-center justify-between">
+      <div className="mt-6 flex items-center">
         <label className="inline-flex cursor-pointer items-center gap-2.5 text-sm text-slate-600">
-          <button
-            role="switch"
-            aria-checked={diffOnly}
-            onClick={() => setDiffOnly((d) => !d)}
-            className={cn('relative h-5 w-9 rounded-full transition-colors', diffOnly ? 'bg-navy-900' : 'bg-slate-300')}
-          >
+          <button role="switch" aria-checked={diffOnly} onClick={() => setDiffOnly((d) => !d)} className={cn('relative h-5 w-9 rounded-full transition-colors', diffOnly ? 'bg-navy-900' : 'bg-slate-300')}>
             <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all', diffOnly ? 'left-[18px]' : 'left-0.5')} />
           </button>
           Show differences only
         </label>
       </div>
 
-      {/* Comparison table */}
       <div className="card mt-3 overflow-x-auto">
         <div className="min-w-fit">
-          {/* Header row */}
           <div className="grid border-b border-slate-100" style={{ gridTemplateColumns: cols }}>
             <div className="flex items-end p-4">
               {items.length < MAX_COMPARE && (
@@ -160,61 +273,44 @@ export default function ComparePage() {
               )}
             </div>
             {items.map((p) => (
-              <div key={p.id} className="relative border-l border-slate-100 p-4">
-                <button onClick={() => setIds(ids.filter((x) => x !== p.id))} className="absolute right-3 top-3 z-10 grid h-7 w-7 place-items-center rounded-lg bg-white/80 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label={`Remove ${p.name}`}>
+              <div key={p.slug} className="relative border-l border-slate-100 p-4">
+                <button onClick={() => setSlugs(slugs.filter((x) => x !== p.slug))} className="absolute right-3 top-3 z-10 grid h-7 w-7 place-items-center rounded-lg bg-white/80 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label={`Remove ${p.name}`}>
                   <X className="h-3.5 w-3.5" />
                 </button>
-                <div className="h-28"><ProductThumb category={p.category} /></div>
-                <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-400">{p.brand}</p>
-                <p className="font-semibold leading-snug text-slate-900">{p.name}</p>
-                {p.id === overall.id && items.length > 1 && (
-                  <span className="mt-2 inline-flex items-center gap-1 rounded-md bg-navy-900 px-2 py-0.5 text-[11px] font-medium text-white"><Trophy className="h-3 w-3" /> Top pick</span>
-                )}
+                <Link to={productPath(p)} className="block h-28"><ProductThumb category={p.category.slug} imageUrl={p.image_url} alt={p.name} /></Link>
+                <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-400">{p.brand} · {p.model}</p>
+                <Link to={productPath(p)} className="font-semibold leading-snug text-slate-900 hover:text-navy-800">{p.name}</Link>
+                <div className="mt-2"><VerificationBadge status={p.verification_status} /></div>
               </div>
             ))}
           </div>
 
           <Row label="Price" cols={cols}>
-            {items.map((p) => <Cell key={p.id} best={items.length > 1 && p.price === best.price}><span className="text-base font-semibold">{formatPrice(p.price)}</span></Cell>)}
+            {items.map((p, i) => <Cell key={p.slug} best={best.price.has(i)}><span className="text-base font-semibold">{formatINR(p.price_inr)}</span></Cell>)}
           </Row>
-          <Row label="Match score" cols={cols}>
-            {items.map((p) => (
-              <Cell key={p.id} best={items.length > 1 && p.score === best.score}>
-                <div className="w-full max-w-[160px]">
-                  <span className="font-medium">{p.score}%</span>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-slate-100"><div className="h-1.5 rounded-full bg-navy-800" style={{ width: `${p.score}%` }} /></div>
-                </div>
-              </Cell>
-            ))}
-          </Row>
-          <Row label="Rating" cols={cols}>
-            {items.map((p) => <Cell key={p.id} best={items.length > 1 && p.rating === best.rating}><Rating value={p.rating} reviews={p.reviews} /></Cell>)}
-          </Row>
-          {visibleKeys.map((k) => (
-            <Row key={k} label={k} cols={cols}>
-              {items.map((p) => <Cell key={p.id}>{p.specs[k] ?? <Minus className="h-4 w-4 text-slate-300" />}</Cell>)}
+          {!diffOnly && (
+            <Row label="Category" cols={cols}>
+              {items.map((p) => <Cell key={p.slug}>{p.category.name}</Cell>)}
+            </Row>
+          )}
+          {visibleSpecs.map((s) => (
+            <Row key={s.key} label={s.label} cols={cols}>
+              {items.map((p, i) => (
+                <Cell key={p.slug} best={s.metric ? best[s.metric].has(i) : false}>
+                  {p.specifications?.[s.key] ?? <Minus className="h-4 w-4 text-slate-300" aria-label="Not listed" />}
+                </Cell>
+              ))}
             </Row>
           ))}
-          {diffOnly && visibleKeys.length === 0 && (
-            <p className="border-b border-slate-100 px-4 py-4 text-sm text-slate-500">These products share identical specs.</p>
-          )}
-          <Row label="Pros" cols={cols}>
-            {items.map((p) => (
-              <Cell key={p.id}>
-                <ul className="space-y-1.5">{p.pros.map((x) => <li key={x} className="flex gap-2"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />{x}</li>)}</ul>
-              </Cell>
-            ))}
-          </Row>
-          <Row label="Cons" cols={cols} last>
-            {items.map((p) => (
-              <Cell key={p.id}>
-                <ul className="space-y-1.5">{p.cons.map((x) => <li key={x} className="flex gap-2"><Minus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-500" />{x}</li>)}</ul>
-              </Cell>
-            ))}
+          {diffOnly && visibleSpecs.length === 0 && <p className="border-b border-slate-100 px-4 py-4 text-sm text-slate-500">These products have identical listed specs.</p>}
+          <Row label="Last verified" cols={cols} last>
+            {items.map((p) => <Cell key={p.slug}><span className="text-slate-500">{p.last_verified_date ?? (p.is_demo ? 'Demo data' : 'Not verified')}</span></Cell>)}
           </Row>
         </div>
       </div>
-      <p className="mt-3 text-xs text-slate-400">All products, prices and ratings are fictional demo data for UI preview.</p>
+      {items.some((p) => p.is_demo) && (
+        <p className="mt-3 text-xs text-slate-400">Products marked “Demo data” are fictional samples — their specs and prices are not real-world information.</p>
+      )}
 
       {saving && (
         <Modal title="Save comparison" onClose={() => setSaving(false)}>
@@ -229,35 +325,23 @@ export default function ComparePage() {
           </form>
         </Modal>
       )}
-
       {adding && (
         <Modal title="Add a product" onClose={() => setAdding(false)}>
-          <div className="-mx-2 max-h-80 space-y-0.5 overflow-y-auto">
-            {candidates.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => {
-                  setIds([...ids, p.id])
-                  setAdding(false)
-                }}
-                className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-slate-50"
-              >
-                <ProductThumb category={p.category} size="sm" className="h-10 w-10" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-slate-900">{p.name}</p>
-                  <p className="text-xs text-slate-500">{getCategory(p.category).name} · {formatPrice(p.price)}</p>
-                </div>
-                <Plus className="h-4 w-4 text-slate-400" />
-              </button>
-            ))}
-          </div>
+          <AddProductPicker
+            exclude={slugs}
+            category={categories.size === 1 ? items[0].category.slug : undefined}
+            onPick={(slug) => {
+              setSlugs([...slugs, slug])
+              setAdding(false)
+            }}
+          />
         </Modal>
       )}
     </div>
   )
 }
 
-function Row({ label, cols, children, last }: { label: string; cols: string; children: React.ReactNode; last?: boolean }) {
+function Row({ label, cols, children, last }: { label: string; cols: string; children: ReactNode; last?: boolean }) {
   return (
     <div className={cn('grid transition-colors hover:bg-slate-50/50', !last && 'border-b border-slate-100')} style={{ gridTemplateColumns: cols }}>
       <div className="sticky left-0 z-[1] bg-white/95 px-4 py-3.5 text-sm font-medium text-slate-500 backdrop-blur">{label}</div>
@@ -266,7 +350,7 @@ function Row({ label, cols, children, last }: { label: string; cols: string; chi
   )
 }
 
-function Cell({ children, best }: { children: React.ReactNode; best?: boolean }) {
+function Cell({ children, best }: { children: ReactNode; best?: boolean }) {
   return (
     <div className={cn('flex items-start gap-2 border-l border-slate-100 px-4 py-3.5 text-sm text-slate-800', best && 'bg-navy-50/50')}>
       <div className="flex-1">{children}</div>

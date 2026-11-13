@@ -4,9 +4,15 @@ import {
 } from 'lucide-react'
 import { Footer, Navbar } from '../components/MarketingLayout'
 import { SearchBox } from '../components/SearchBox'
-import { DemoBadge, ProductThumb, Rating, categoryIcons } from '../components/ui'
-import { categories, examplePrompts, getProduct, products } from '../data/demo'
-import { formatPrice } from '../lib/format'
+import { productPath } from '../components/ProductCard'
+import { ErrorState, ProductThumb, Skeleton, VerificationBadge, categoryIcon } from '../components/ui'
+import { examplePrompts } from '../data/demo'
+import { useCategories, useProducts } from '../hooks/useApi'
+import { errorMessage } from '../lib/api'
+import { formatINR } from '../lib/format'
+import { parsePrompt, searchUrl } from '../lib/prompt'
+
+const PREVIEW_PROMPT = 'Laptop under ₹1.5 lakh with 16 GB RAM'
 
 const steps = [
   { icon: MessageSquareText, title: 'Describe what you need', text: 'Tell Siftwell your budget, how you will use it and what matters most — in plain language.' },
@@ -25,8 +31,10 @@ const features = [
 
 export default function Landing() {
   const navigate = useNavigate()
-  const search = (q: string) => navigate(`/app/search?q=${encodeURIComponent(q)}`)
-  const preview = ['lp-aurora-14', 'lp-slate-13', 'lp-vertex-16'].map((id) => getProduct(id)!)
+  const search = (q: string) => navigate(searchUrl(q))
+  const categories = useCategories()
+  const parsedPreview = parsePrompt(PREVIEW_PROMPT)
+  const preview = useProducts({ q: parsedPreview.keywords.join(' '), category: parsedPreview.category, max_price: parsedPreview.maxPrice, sort: 'price_desc', limit: 3 })
 
   return (
     <div className="min-h-screen bg-white">
@@ -67,7 +75,7 @@ export default function Landing() {
           <div className="mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-slate-500">
             <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-navy-600" /> Free to start</span>
             <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-navy-600" /> No sponsored rankings</span>
-            <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-navy-600" /> 8 categories</span>
+            <span className="inline-flex items-center gap-2"><BadgeCheck className="h-4 w-4 text-navy-600" /> Prices in ₹</span>
           </div>
         </div>
 
@@ -78,40 +86,40 @@ export default function Landing() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <Sparkles className="h-4 w-4 text-navy-600" />
-                  <span>“Best laptop under $2,000 for coding and travel”</span>
+                  <span>“{PREVIEW_PROMPT}”</span>
                 </div>
-                <DemoBadge />
+                <span className="text-xs text-slate-400">Live from the Siftwell catalogue</span>
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                {preview.map((p, i) => (
-                  <div key={p.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-soft">
-                    <div className="flex items-center gap-3">
-                      <ProductThumb category={p.category} size="sm" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">{p.name}</p>
-                        <p className="text-xs text-slate-500">{p.brand}</p>
+                {preview.error ? (
+                  <p className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 sm:col-span-3">
+                    Live product preview is unavailable right now. Start the backend to see real catalogue data.
+                  </p>
+                ) : preview.loading || !preview.data ? (
+                  Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)
+                ) : (
+                  preview.data.items.map((p, i) => (
+                    <button key={p.slug} onClick={() => navigate(productPath(p))} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-soft transition hover:border-slate-300 hover:shadow-card">
+                      <div className="flex items-center gap-3">
+                        <ProductThumb category={p.category.slug} imageUrl={p.image_url} size="sm" />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{p.name}</p>
+                          <p className="text-xs text-slate-500">{p.brand} · {p.model}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between">
-                      <span className="font-semibold text-slate-900">{formatPrice(p.price)}</span>
-                      <Rating value={p.rating} />
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex justify-between text-xs text-slate-500">
-                        <span>Match</span>
-                        <span className="font-medium text-slate-800">{p.score}%</span>
+                      <p className="mt-4 font-semibold text-slate-900">{formatINR(p.price_inr)}</p>
+                      <p className="mt-1 truncate text-xs text-slate-500">{[p.specifications?.ram, p.specifications?.storage].filter(Boolean).join(' · ')}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <VerificationBadge status={p.verification_status} />
+                        {i === 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-0.5 text-[11px] font-medium text-navy-800">
+                            <BadgeCheck className="h-3 w-3" /> Closest to budget
+                          </span>
+                        )}
                       </div>
-                      <div className="mt-1.5 h-1.5 rounded-full bg-slate-100">
-                        <div className="h-1.5 rounded-full bg-navy-800" style={{ width: `${p.score}%` }} />
-                      </div>
-                    </div>
-                    {i === 0 && (
-                      <p className="mt-3 inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-1 text-[11px] font-medium text-navy-800">
-                        <BadgeCheck className="h-3 w-3" /> Best overall for you
-                      </p>
-                    )}
-                  </div>
-                ))}
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -176,27 +184,39 @@ export default function Landing() {
             </div>
             <p className="max-w-sm text-sm text-slate-600">Start with a category, then refine with your own words.</p>
           </div>
-          <div className="mt-12 grid grid-cols-2 gap-4 md:grid-cols-4">
-            {categories.map((c) => {
-              const Icon = categoryIcons[c.id]
-              const count = products.filter((p) => p.category === c.id).length
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {categories.loading &&
+              Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-2xl" />)}
+            {categories.error && (
+              <div className="sm:col-span-2 lg:col-span-3">
+                <ErrorState compact title="Couldn’t load categories" message={errorMessage(categories.error)} onRetry={categories.reload} />
+              </div>
+            )}
+            {categories.data?.map((c) => {
+              const Icon = categoryIcon(c.slug)
               return (
                 <button
-                  key={c.id}
-                  onClick={() => navigate(`/app/search?category=${c.id}`)}
-                  className="card group p-5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-navy-200 hover:shadow-lift"
+                  key={c.slug}
+                  onClick={() => navigate(`/app/search?category=${c.slug}`)}
+                  className="card group p-6 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-navy-200 hover:shadow-lift"
                 >
-                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-700 transition-colors group-hover:bg-navy-900 group-hover:text-white">
+                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-slate-700 transition-colors group-hover:bg-navy-900 group-hover:text-white">
                     <Icon className="h-5 w-5" />
                   </div>
-                  <h3 className="mt-5 font-semibold text-slate-900">{c.name}</h3>
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">{c.description}</p>
-                  <p className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-navy-700">
-                    {count} demo products <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                  <h3 className="mt-5 text-lg font-semibold text-slate-900">{c.name}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-500">{c.description}</p>
+                  <p className="mt-5 inline-flex items-center gap-1 text-sm font-medium text-navy-700">
+                    Browse {c.product_count} {c.product_count === 1 ? 'product' : 'products'} <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                   </p>
                 </button>
               )
             })}
+            {categories.data && (
+              <div className="flex flex-col justify-center rounded-2xl border border-dashed border-slate-300 p-6 text-left">
+                <h3 className="font-semibold text-slate-700">More categories soon</h3>
+                <p className="mt-1 text-sm text-slate-500">Headphones, tablets, cameras and more are on the way.</p>
+              </div>
+            )}
           </div>
         </div>
       </section>

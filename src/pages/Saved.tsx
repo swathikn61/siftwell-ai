@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bookmark, Check, Clock, MoreHorizontal, Pencil, Search, Trash2, X } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { EmptyState, ProductThumb } from '../components/ui'
-import { getProduct, type Product } from '../data/demo'
-import { cn, formatDate, formatPrice } from '../lib/format'
+import { EmptyState, ErrorState, ProductThumb, Skeleton } from '../components/ui'
+import { useProductsBySlugs } from '../hooks/useApi'
+import { errorMessage } from '../lib/api'
+import { cn, formatDate, formatINR } from '../lib/format'
 
 type Tab = 'all' | 'recent' | 'notes'
 
@@ -17,6 +18,10 @@ export default function SavedPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
 
+  // Load every product referenced by any saved comparison (cached ones appear instantly)
+  const allSlugs = useMemo(() => [...new Set(savedComparisons.flatMap((c) => c.productSlugs))], [savedComparisons])
+  const { bySlug, loading, error, reload } = useProductsBySlugs(allSlugs)
+
   const list = useMemo(() => {
     const weekAgo = Date.now() - 7 * 24 * 3600 * 1000
     return savedComparisons
@@ -24,10 +29,10 @@ export default function SavedPage() {
       .filter((c) => {
         const q = query.toLowerCase().trim()
         if (!q) return true
-        const names = c.productIds.map((id) => getProduct(id)?.name ?? '').join(' ')
+        const names = c.productSlugs.map((slug) => bySlug.get(slug)?.name ?? '').join(' ')
         return `${c.title} ${names}`.toLowerCase().includes(q)
       })
-  }, [savedComparisons, tab, query])
+  }, [savedComparisons, tab, query, bySlug])
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -40,7 +45,7 @@ export default function SavedPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Saved comparisons</h1>
-          <p className="mt-1 text-sm text-slate-500">{savedComparisons.length} saved · open one to keep researching</p>
+          <p className="mt-1 text-sm text-slate-500">{savedComparisons.length} saved in this browser · open one to keep researching</p>
         </div>
         <Link to="/app/search" className="btn-primary"><Search className="h-4 w-4" /> New search</Link>
       </div>
@@ -65,6 +70,8 @@ export default function SavedPage() {
         </div>
       </div>
 
+      {error && <div className="mt-6"><ErrorState compact title="Couldn’t load product details" message={errorMessage(error)} onRetry={reload} /></div>}
+
       <div className="mt-6">
         {list.length === 0 ? (
           <EmptyState
@@ -76,9 +83,10 @@ export default function SavedPage() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {list.map((c) => {
-              const items = c.productIds.map(getProduct).filter((p): p is Product => !!p)
-              const prices = items.map((p) => p.price)
-              const top = items.length ? items.reduce((a, b) => (b.score > a.score ? b : a)) : undefined
+              const items = c.productSlugs.map((slug) => bySlug.get(slug)).filter((p) => !!p)
+              const unavailable = loading ? 0 : c.productSlugs.length - items.length
+              const prices = items.map((p) => Number(p.price_inr))
+              const cheapest = items.length > 1 ? items.reduce((a, b) => (Number(b.price_inr) < Number(a.price_inr) ? b : a)) : undefined
               return (
                 <article key={c.id} className="card group flex flex-col p-5 transition-all duration-300 hover:border-slate-300 hover:shadow-lift">
                   <div className="flex items-start justify-between gap-3">
@@ -115,22 +123,24 @@ export default function SavedPage() {
                   </div>
 
                   <ul className="mt-4 space-y-2">
+                    {loading && items.length === 0 && c.productSlugs.map((slug) => <Skeleton key={slug} className="h-9 w-full" />)}
                     {items.map((p) => (
-                      <li key={p.id} className="flex items-center gap-3">
-                        <ProductThumb category={p.category} size="sm" className="h-9 w-9 rounded-lg" />
-                        <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{p.name}</span>
-                        {top?.id === p.id && <span className="rounded bg-navy-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-navy-800">Top pick</span>}
-                        <span className="text-sm font-medium text-slate-900">{formatPrice(p.price)}</span>
+                      <li key={p.slug} className="flex items-center gap-3">
+                        <ProductThumb category={p.category.slug} imageUrl={p.image_url} size="sm" className="h-9 w-9 rounded-lg" />
+                        <Link to={`/app/products/${p.slug}`} className="min-w-0 flex-1 truncate text-sm text-slate-700 hover:text-navy-800">{p.name}</Link>
+                        {cheapest?.slug === p.slug && <span className="rounded bg-navy-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-navy-800">Lowest price</span>}
+                        <span className="text-sm font-medium text-slate-900">{formatINR(p.price_inr)}</span>
                       </li>
                     ))}
+                    {unavailable > 0 && <li className="text-xs text-slate-400">{unavailable} product{unavailable > 1 ? 's' : ''} no longer available</li>}
                   </ul>
                   {c.note && <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs italic text-slate-600">“{c.note}”</p>}
 
                   <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
-                    <span className="text-xs text-slate-500">{prices.length ? `${formatPrice(Math.min(...prices))} – ${formatPrice(Math.max(...prices))}` : ''}</span>
+                    <span className="text-xs text-slate-500">{prices.length ? `${formatINR(Math.min(...prices))} – ${formatINR(Math.max(...prices))}` : ''}</span>
                     <button
                       onClick={() => {
-                        setCompare(c.productIds)
+                        setCompare(c.productSlugs)
                         navigate('/app/compare')
                       }}
                       className="btn-secondary py-2 text-xs"

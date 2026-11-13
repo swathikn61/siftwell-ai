@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { demoSavedComparisons, demoSavedProductIds, demoUser, type SavedComparison } from '../data/demo'
+import { demoSavedComparisons, demoSavedProductSlugs, demoUser, type SavedComparison } from '../data/demo'
 
 /**
  * Frontend-only app state. Authentication is simulated and everything is kept in
@@ -34,14 +34,16 @@ interface AppState {
   updateUser: (patch: Partial<User>) => void
   preferences: Preferences
   updatePreferences: (patch: Partial<Preferences>) => void
+  /** Backend product slugs */
   compareIds: string[]
   toggleCompare: (id: string) => void
   setCompare: (ids: string[]) => void
   clearCompare: () => void
+  /** Backend product slugs */
   savedProductIds: string[]
   toggleSavedProduct: (id: string) => void
   savedComparisons: SavedComparison[]
-  saveComparison: (title: string, productIds: string[]) => SavedComparison
+  saveComparison: (title: string, productSlugs: string[]) => SavedComparison
   deleteComparison: (id: string) => void
   renameComparison: (id: string, title: string) => void
   toasts: Toast[]
@@ -74,20 +76,22 @@ function usePersisted<T>(key: string, fallback: T) {
 }
 
 const defaultPreferences: Preferences = {
-  budgetMin: 200,
-  budgetMax: 1500,
-  categories: ['laptops', 'headphones'],
+  budgetMin: 0,
+  budgetMax: 150000, // INR
+  categories: ['laptops', 'smartphones'],
   priorities: ['Battery life', 'Build quality', 'Value for money'],
   emailDigest: true,
   priceAlerts: true,
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  // Keys end in "v2" because products are now identified by backend slugs;
+  // values saved by the old mock-data version are simply ignored.
   const [user, setUser] = usePersisted<User | null>('user', null)
-  const [preferences, setPreferences] = usePersisted<Preferences>('preferences', defaultPreferences)
-  const [compareIds, setCompareIds] = usePersisted<string[]>('compare', [])
-  const [savedProductIds, setSavedProductIds] = usePersisted<string[]>('savedProducts', demoSavedProductIds)
-  const [savedComparisons, setSavedComparisons] = usePersisted<SavedComparison[]>('comparisons', demoSavedComparisons)
+  const [preferences, setPreferences] = usePersisted<Preferences>('preferences.v2', defaultPreferences)
+  const [compareIds, setCompareIds] = usePersisted<string[]>('compare.v2', [])
+  const [savedProductIds, setSavedProductIds] = usePersisted<string[]>('savedProducts.v2', demoSavedProductSlugs)
+  const [savedComparisons, setSavedComparisons] = usePersisted<SavedComparison[]>('comparisons.v2', demoSavedComparisons)
   const [toasts, setToasts] = useState<Toast[]>([])
 
   const notify = useCallback((message: string) => {
@@ -126,8 +130,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notify(saved ? 'Removed from saved products' : 'Saved to your products')
       },
       savedComparisons,
-      saveComparison: (title, productIds) => {
-        const c: SavedComparison = { id: `cmp-${Date.now()}`, title, productIds, createdAt: new Date().toISOString() }
+      saveComparison: (title, productSlugs) => {
+        const c: SavedComparison = { id: `cmp-${Date.now()}`, title, productSlugs, createdAt: new Date().toISOString() }
         setSavedComparisons((list) => [c, ...list])
         notify('Comparison saved')
         return c

@@ -2,9 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CreditCard, LogOut, SlidersHorizontal, User as UserIcon } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { DemoBadge, categoryIcons } from '../components/ui'
-import { categories } from '../data/demo'
-import { cn, formatPrice } from '../lib/format'
+import { DemoBadge, ErrorState, Skeleton, categoryIcon } from '../components/ui'
+import { useCategories } from '../hooks/useApi'
+import { errorMessage } from '../lib/api'
+import { cn, formatINR } from '../lib/format'
 
 type Tab = 'profile' | 'preferences' | 'notifications' | 'billing'
 
@@ -35,8 +36,9 @@ export default function ProfilePage() {
   const { user, updateUser, preferences, updatePreferences, logout, notify } = useApp()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('profile')
-  const [form, setForm] = useState({ name: user?.name ?? '', email: user?.email ?? '', location: user?.location ?? '', currency: user?.currency ?? 'USD' })
+  const [form, setForm] = useState({ name: user?.name ?? '', email: user?.email ?? '', location: user?.location ?? '', currency: user?.currency ?? 'INR' })
   const [prefs, setPrefs] = useState(preferences)
+  const categories = useCategories()
 
   const initials = (user?.name ?? 'U').split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase()
 
@@ -105,7 +107,7 @@ export default function ProfilePage() {
                 <div>
                   <label htmlFor="p-cur" className="label">Currency</label>
                   <select id="p-cur" className="input" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
-                    {['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD'].map((c) => <option key={c}>{c}</option>)}
+                    {['INR', 'USD', 'EUR', 'GBP'].map((c) => <option key={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
@@ -124,19 +126,21 @@ export default function ProfilePage() {
               <div className="mt-6">
                 <div className="flex items-center justify-between">
                   <span className="label mb-0">Typical maximum budget</span>
-                  <span className="text-sm font-semibold text-slate-900">{formatPrice(prefs.budgetMax)}</span>
+                  <span className="text-sm font-semibold text-slate-900">{formatINR(prefs.budgetMax)}</span>
                 </div>
-                <input type="range" min={100} max={2500} step={50} value={prefs.budgetMax} onChange={(e) => setPrefs({ ...prefs, budgetMax: Number(e.target.value) })} className="mt-3 w-full accent-navy-900" aria-label="Maximum budget" />
+                <input type="range" min={10000} max={300000} step={5000} value={prefs.budgetMax} onChange={(e) => setPrefs({ ...prefs, budgetMax: Number(e.target.value) })} className="mt-3 w-full accent-navy-900" aria-label="Maximum budget" />
               </div>
 
               <div className="mt-8">
                 <span className="label">Categories you shop for</span>
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {categories.map((c) => {
-                    const Icon = categoryIcons[c.id]
-                    const on = prefs.categories.includes(c.id)
+                  {categories.loading && <Skeleton className="col-span-2 h-11" />}
+                  {categories.error && <div className="col-span-full"><ErrorState compact message={errorMessage(categories.error)} onRetry={categories.reload} /></div>}
+                  {categories.data?.map((c) => {
+                    const Icon = categoryIcon(c.slug)
+                    const on = prefs.categories.includes(c.slug)
                     return (
-                      <button key={c.id} onClick={() => setPrefs({ ...prefs, categories: toggleIn(prefs.categories, c.id) })} aria-pressed={on} className={cn('flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition', on ? 'border-navy-800 bg-navy-50 font-medium text-navy-900' : 'border-slate-200 text-slate-600 hover:border-slate-300')}>
+                      <button key={c.slug} onClick={() => setPrefs({ ...prefs, categories: toggleIn(prefs.categories, c.slug) })} aria-pressed={on} className={cn('flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition', on ? 'border-navy-800 bg-navy-50 font-medium text-navy-900' : 'border-slate-200 text-slate-600 hover:border-slate-300')}>
                         <Icon className="h-4 w-4" /> {c.name}
                       </button>
                     )
@@ -184,8 +188,8 @@ export default function ProfilePage() {
               </div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {[
-                  { name: 'Free', price: '$0', features: ['10 AI searches / month', '3 saved comparisons', 'Core categories'] },
-                  { name: 'Pro', price: '$9', features: ['Unlimited AI searches', 'Unlimited saved comparisons', 'Price-drop alerts', 'Priority support'], current: true },
+                  { name: 'Free', price: '₹0', features: ['10 AI searches / month', '3 saved comparisons', 'Core categories'] },
+                  { name: 'Pro', price: '₹299', features: ['Unlimited AI searches', 'Unlimited saved comparisons', 'Price-drop alerts', 'Priority support'], current: true },
                 ].map((p) => (
                   <div key={p.name} className={cn('rounded-2xl border p-5', p.current ? 'border-navy-800 ring-4 ring-navy-50' : 'border-slate-200')}>
                     <div className="flex items-center justify-between">

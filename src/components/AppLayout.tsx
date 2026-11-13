@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
-  Bookmark, GitCompareArrows, LayoutDashboard, LogOut, Menu, Search, Settings, X, Sparkles, HelpCircle,
+  Bookmark, GitCompareArrows, LayoutDashboard, LogOut, Menu, Search, Settings, X, Sparkles, HelpCircle, WifiOff,
 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { getProduct } from '../data/demo'
+import { useAsync, useProductsBySlugs } from '../hooks/useApi'
+import { api, ApiError, API_URL } from '../lib/api'
 import { cn } from '../lib/format'
 import { DemoBadge, Logo, ProductThumb } from './ui'
 
@@ -89,21 +90,21 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 function CompareTray() {
   const { compareIds, toggleCompare, clearCompare } = useApp()
   const { pathname } = useLocation()
+  const { bySlug } = useProductsBySlugs(compareIds)
   if (!compareIds.length || pathname.startsWith('/app/compare')) return null
   return (
     <div className="animate-fade-up fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 lg:pl-64">
       <div className="flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-slate-200 bg-white/95 p-2.5 pl-4 shadow-lift backdrop-blur">
         <div className="hidden text-sm font-medium text-slate-700 sm:block">Compare</div>
         <div className="flex flex-1 items-center gap-2 overflow-x-auto">
-          {compareIds.map((id) => {
-            const p = getProduct(id)
-            if (!p) return null
+          {compareIds.map((slug) => {
+            const p = bySlug.get(slug)
             return (
-              <div key={id} className="group relative" title={p.name}>
-                <ProductThumb category={p.category} size="sm" className="h-10 w-10" />
+              <div key={slug} className="group relative" title={p?.name ?? 'Loading…'}>
+                <ProductThumb category={p?.category.slug} imageUrl={p?.image_url} size="sm" className="h-10 w-10" />
                 <button
-                  onClick={() => toggleCompare(id)}
-                  aria-label={`Remove ${p.name} from compare`}
+                  onClick={() => toggleCompare(slug)}
+                  aria-label={`Remove ${p?.name ?? slug} from compare`}
                   className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-slate-900 text-white opacity-0 transition group-hover:opacity-100 focus:opacity-100"
                 >
                   <X className="h-3 w-3" />
@@ -118,6 +119,38 @@ function CompareTray() {
           Compare now
         </Link>
       </div>
+    </div>
+  )
+}
+
+/** Shows a banner when the backend can't be reached, with a retry button. */
+function ApiStatusBanner() {
+  const { pathname } = useLocation()
+  const { data, error, reload } = useAsync((signal) => api.health(signal), [pathname])
+  // Remember the last result so the banner doesn't flicker while re-checking
+  const [lastError, setLastError] = useState<Error>()
+  useEffect(() => {
+    if (error) setLastError(error)
+    else if (data) setLastError(undefined)
+  }, [error, data])
+  // While the API is down, quietly check again every 5 seconds so the banner clears by itself
+  useEffect(() => {
+    if (!lastError) return
+    const t = window.setInterval(reload, 5000)
+    return () => window.clearInterval(t)
+  }, [lastError, reload])
+  if (!lastError) return null
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-800 sm:px-6 lg:px-8">
+      <WifiOff className="h-4 w-4 shrink-0" />
+      <span className="flex-1">
+        {lastError instanceof ApiError && !lastError.isNetwork ? (
+          <>The Siftwell API is running, but its database isn’t reachable. Product data may not load.</>
+        ) : (
+          <>Can’t reach the Siftwell API at <code className="rounded bg-rose-100 px-1">{API_URL}</code>. Product data won’t load until the backend is running.</>
+        )}
+      </span>
+      <button onClick={reload} className="font-medium underline-offset-2 hover:underline">Retry</button>
     </div>
   )
 }
@@ -165,6 +198,7 @@ export function AppLayout() {
             </a>
           </div>
         </header>
+        <ApiStatusBanner />
         <main className="mx-auto max-w-7xl px-4 pb-32 pt-6 sm:px-6 lg:px-8 lg:pt-8">
           <Outlet />
         </main>

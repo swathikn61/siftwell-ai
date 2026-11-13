@@ -7,6 +7,7 @@ import Landing from './pages/Landing'
 import { Login, Signup } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import SearchPage from './pages/Search'
+import ProductDetail from './pages/ProductDetail'
 import ComparePage from './pages/Compare'
 import SavedPage from './pages/Saved'
 import ProfilePage from './pages/Profile'
@@ -52,6 +53,7 @@ export default function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="products/:slug" element={<ProductDetail />} />
           <Route path="compare" element={<ComparePage />} />
           <Route path="saved" element={<SavedPage />} />
           <Route path="profile" element={<ProfilePage />} />
