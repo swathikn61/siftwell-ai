@@ -17,7 +17,7 @@ function greeting() {
 }
 
 export default function Dashboard() {
-  const { user, savedComparisons, savedProductIds, compareIds, preferences, toggleSavedProduct } = useApp()
+  const { user, savedComparisons, comparisonsState, savedProductIds, favouritesState, searchHistory, historyState, compareIds, preferences, toggleSavedProduct, reloadUserData } = useApp()
   const navigate = useNavigate()
   const search = (q: string) => navigate(searchUrl(q))
   const firstName = user?.name.split(' ')[0] ?? 'there'
@@ -26,7 +26,7 @@ export default function Dashboard() {
   const preferredCategory = preferences.categories.length === 1 ? preferences.categories[0] : undefined
   const recommended = useProducts({ category: preferredCategory, max_price: preferences.budgetMax, sort: 'price_desc', limit: 4 })
 
-  const recentComparisons = savedComparisons.slice(0, 3)
+  const recentComparisons = useMemo(() => savedComparisons.slice(0, 3), [savedComparisons])
   const comparisonSlugs = useMemo(() => [...new Set(recentComparisons.flatMap((c) => c.productSlugs))], [recentComparisons])
   const comparisonProducts = useProductsBySlugs(comparisonSlugs)
   const saved = useProductsBySlugs(savedProductIds)
@@ -74,7 +74,11 @@ export default function Dashboard() {
           subtitle="Pick up where you left off"
           action={<Link to="/app/saved" className="inline-flex items-center gap-1 text-sm font-medium text-navy-800 hover:underline">View all <ArrowRight className="h-3.5 w-3.5" /></Link>}
         />
-        {recentComparisons.length === 0 ? (
+        {comparisonsState === 'loading' || comparisonsState === 'idle' ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-40 rounded-2xl" />)}</div>
+        ) : comparisonsState === 'error' ? (
+          <ErrorState compact title="Couldn’t load your saved comparisons" message="Check your connection and try again." onRetry={reloadUserData} />
+        ) : recentComparisons.length === 0 ? (
           <EmptyState icon={GitCompareArrows} title="No comparisons yet" text="Search for products and add two or more to compare them side by side." action={<Link to="/app/search" className="btn-primary">Find products</Link>} />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -127,10 +131,38 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/* Recent searches */}
+      {(historyState !== 'ready' || searchHistory.length > 0) && (
+        <section>
+          <SectionHeader
+            title="Recent searches"
+            subtitle="Run a previous search again"
+            action={<Link to="/app/profile#history" className="inline-flex items-center gap-1 text-sm font-medium text-navy-800 hover:underline">Manage <ArrowRight className="h-3.5 w-3.5" /></Link>}
+          />
+          {historyState === 'error' ? (
+            <ErrorState compact title="Couldn’t load your search history" message="Check your connection and try again." onRetry={reloadUserData} />
+          ) : historyState !== 'ready' ? (
+            <div className="flex flex-wrap gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-9 w-48 rounded-full" />)}</div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {searchHistory.slice(0, 6).map((h) => (
+                <Link key={h.id} to={searchUrl(h.query)} className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-700 shadow-soft transition hover:border-navy-200 hover:text-navy-900" title={`Searched ${formatDate(h.created_at)}`}>
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-slate-400" /> <span className="truncate">{h.query}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Saved products */}
       <section>
         <SectionHeader title="Saved products" subtitle="Products you’re keeping an eye on" />
-        {savedProductIds.length === 0 ? (
+        {favouritesState === 'loading' || favouritesState === 'idle' ? (
+          <div className="card divide-y divide-slate-100">{[0, 1].map((i) => <div key={i} className="p-4"><Skeleton className="h-10 w-full" /></div>)}</div>
+        ) : favouritesState === 'error' ? (
+          <ErrorState compact title="Couldn’t load saved products" message="Check your connection and try again." onRetry={reloadUserData} />
+        ) : savedProductIds.length === 0 ? (
           <EmptyState icon={Bookmark} title="No saved products" text="Tap the bookmark on any product to keep track of it here." />
         ) : saved.error ? (
           <ErrorState compact title="Couldn’t load saved products" message={errorMessage(saved.error)} onRetry={saved.reload} />

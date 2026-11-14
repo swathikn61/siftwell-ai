@@ -359,6 +359,7 @@ export default function ComparePage() {
   const { compareIds: slugs, setCompare, saveComparison, notify } = useApp()
   const [picking, setPicking] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveState, setSaveState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
   const [title, setTitle] = useState('')
   const [diffOnly, setDiffOnly] = useState(false)
 
@@ -406,11 +407,17 @@ export default function ComparePage() {
     : null
   const defaultTitle = !sameCategory || !shown.length ? 'My comparison' : `${shown[0].category.name} comparison`
 
-  const submitSave = (e: FormEvent) => {
+  const submitSave = async (e: FormEvent) => {
     e.preventDefault()
-    saveComparison(title.trim() || defaultTitle, shown.map((p) => p.slug))
-    setSaving(false)
-    setTitle('')
+    setSaveState({ busy: true, error: null })
+    try {
+      await saveComparison(title.trim() || defaultTitle, shown.map((p) => p.slug))
+      setSaving(false)
+      setTitle('')
+      setSaveState({ busy: false, error: null })
+    } catch (err) {
+      setSaveState({ busy: false, error: errorMessage(err) })
+    }
   }
   const copyLink = async () => {
     try {
@@ -536,9 +543,10 @@ export default function ComparePage() {
             <label htmlFor="cmp-title" className="label">Name</label>
             <input id="cmp-title" autoFocus className="input" placeholder={defaultTitle} value={title} onChange={(e) => setTitle(e.target.value)} />
             <p className="mt-2 text-xs text-slate-500">{shown.map((p) => p.name).join(' · ')}</p>
+            {saveState.error && <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{saveState.error}</p>}
             <div className="mt-6 flex justify-end gap-2">
               <button type="button" onClick={() => setSaving(false)} className="btn-ghost">Cancel</button>
-              <button type="submit" className="btn-primary">Save</button>
+              <button type="submit" disabled={saveState.busy} className="btn-primary">{saveState.busy ? 'Saving…' : 'Save'}</button>
             </div>
           </form>
         </Modal>

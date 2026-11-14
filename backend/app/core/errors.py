@@ -78,6 +78,13 @@ class RateLimitedError(AppError):
     code = "rate_limited"
 
 
+class WrongPasswordError(AppError):
+    """A logged-in user typed the wrong password to confirm an action (not a session problem)."""
+
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "wrong_password"
+
+
 class UnauthorizedError(AppError):
     status_code = status.HTTP_401_UNAUTHORIZED
     code = "unauthorized"

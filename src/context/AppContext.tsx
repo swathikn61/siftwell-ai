@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, errorMessage, onUnauthorized, tokenStore } from '../lib/api'
+import { api, ApiError, errorMessage, onUnauthorized, tokenStore } from '../lib/api'
 import type { SavedComparisonApi, SearchHistoryEntry, TokenResponse, UserAccount, UserPreferencesApi } from '../types/api'
 
 /**
@@ -44,6 +44,8 @@ interface AppState {
   login: (email: string, password: string, remember: boolean) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  /** Forget the session locally without calling the server (after "log out everywhere" or account deletion) */
+  forgetSession: () => void
   /** Called after a password change: keep this device signed in with the new token */
   applyToken: (res: TokenResponse) => void
   updateUser: (patch: { name?: string; location?: string; currency?: string }) => Promise<void>
@@ -108,6 +110,9 @@ const toComparison = (c: SavedComparisonApi): SavedComparison => ({
   note: c.note,
 })
 
+/** The session ended (already announced by the unauthorized handler), so don't show a second message. */
+const isSessionEnded = (err: unknown) => err instanceof ApiError && err.status === 401
+
 function loadCompare(): string[] {
   try {
     const raw = localStorage.getItem('siftwell:compare.v2')
@@ -121,6 +126,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [authStatus, setAuthStatus] = useState<AuthStatus>(() => (tokenStore.get() ? 'checking' : 'anonymous'))
   const [compareIds, setCompareIds] = useState<string[]>(loadCompare)
+  const compareRef = useRef(compareIds)
+  compareRef.current = compareIds
   const [savedProductIds, setSavedProductIds] = useState<string[]>([])
   const [favouritesState, setFavouritesState] = useState<LoadState>('idle')
   const [savedComparisons, setSavedComparisons] = useState<SavedComparison[]>([])
@@ -226,6 +233,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         resetSession()
       },
+      forgetSession: resetSession,
       applyToken: (res) => {
         tokenStore.replace(res.access_token)
         setUser(res.user)
@@ -240,16 +248,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       compareIds,
       toggleCompare: (id) => {
-        if (compareIds.includes(id)) {
-          setCompareIds(compareIds.filter((x) => x !== id))
-        } else if (compareIds.length >= MAX_COMPARE) {
+        // Work from the latest list (a ref), so quick successive clicks don't overwrite each other
+        const prev = compareRef.current
+        if (!prev.includes(id) && prev.length >= MAX_COMPARE) {
           notify(`You can compare up to ${MAX_COMPARE} products at once`)
-        } else {
-          setCompareIds([...compareIds, id])
+          return
         }
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        compareRef.current = next
+        setCompareIds(next)
       },
-      setCompare: (ids) => setCompareIds(ids.slice(0, MAX_COMPARE)),
-      clearCompare: () => setCompareIds([]),
+      setCompare: (ids) => {
+        compareRef.current = ids.slice(0, MAX_COMPARE)
+        setCompareIds(compareRef.current)
+      },
+      clearCompare: () => {
+        compareRef.current = []
+        setCompareIds([])
+      },
       savedProductIds,
       favouritesState,
       toggleSavedProduct: async (slug) => {
@@ -262,7 +278,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           notify(saved ? 'Removed from saved products' : 'Saved to your products')
         } catch (err) {
           setSavedProductIds((ids) => (saved ? [slug, ...ids.filter((x) => x !== slug)] : ids.filter((x) => x !== slug)))
-          notify(`Couldn’t update saved products: ${errorMessage(err)}`)
+          if (!isSessionEnded(err)) notify(`Couldn’t update saved products: ${errorMessage(err)}`)
         }
       },
       savedComparisons,
@@ -281,7 +297,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           notify('Comparison deleted')
         } catch (err) {
           setSavedComparisons(before)
-          notify(`Couldn’t delete: ${errorMessage(err)}`)
+          if (!isSessionEnded(err)) notify(`Couldn’t delete: ${errorMessage(err)}`)
         }
       },
       renameComparison: async (id, title) => {
@@ -291,7 +307,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       searchHistory,
       historyState,
       recordSearch: (query, filters) => {
-        const key = `${query}|${JSON.stringify(filters)}`
+        const key = query.trim().toLowerCase()
         if (!query.trim() || lastRecorded.current === key) return
         lastRecorded.current = key
         api

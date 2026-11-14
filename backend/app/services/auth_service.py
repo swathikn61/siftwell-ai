@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.errors import ConflictError, RateLimitedError, UnauthorizedError
+from app.core.errors import ConflictError, RateLimitedError, UnauthorizedError, WrongPasswordError
 from app.core.security import DUMMY_HASH, create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.models.user_data import Favourite, SavedComparison, SearchHistoryEntry
@@ -119,7 +119,7 @@ def update_profile(db: Session, user: User, data: ProfileUpdate) -> User:
 
 def change_password(db: Session, user: User, data: PasswordChange) -> TokenResponse:
     if not verify_password(data.current_password, user.password_hash):
-        raise UnauthorizedError("Your current password is incorrect.")
+        raise WrongPasswordError("Your current password is incorrect.")
     user.password_hash = hash_password(data.new_password)
     user.token_version += 1  # log out other devices
     db.commit()
@@ -129,7 +129,7 @@ def change_password(db: Session, user: User, data: PasswordChange) -> TokenRespo
 
 def delete_account(db: Session, user: User, password: str) -> None:
     if not verify_password(password, user.password_hash):
-        raise UnauthorizedError("Password is incorrect.")
+        raise WrongPasswordError("Password is incorrect.")
     # Delete owned rows explicitly (works even where the database doesn't enforce ON DELETE CASCADE)
     for model in (SavedComparison, Favourite, SearchHistoryEntry):
         db.execute(delete(model).where(model.user_id == user.id))

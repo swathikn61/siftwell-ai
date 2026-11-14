@@ -14,8 +14,18 @@ import ProfilePage from './pages/Profile'
 import NotFound from './pages/NotFound'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user } = useApp()
+  const { user, authStatus } = useApp()
   const location = useLocation()
+  // While a stored session is being checked, wait instead of bouncing to the login page
+  if (authStatus === 'checking') {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-50" role="status" aria-live="polite">
+        <div className="flex items-center gap-2.5 text-sm text-slate-500">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-navy-800" /> Restoring your session…
+        </div>
+      </div>
+    )
+  }
   if (!user) {
     const redirect = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/login?redirect=${redirect}`} replace />

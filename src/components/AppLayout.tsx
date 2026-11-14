@@ -60,10 +60,10 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <div className="m-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-soft">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Sparkles className="h-4 w-4 text-navy-600" /> Siftwell Pro
+          <Sparkles className="h-4 w-4 text-navy-600" /> Demo catalogue
         </div>
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">Unlimited AI comparisons and price-drop alerts.</p>
-        <DemoBadge className="mt-3" label="Preview build" />
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">Products, specs and prices shown are fictional sample data for this preview.</p>
+        <DemoBadge className="mt-3" label="Demo data" />
       </div>
       <div className="flex items-center gap-3 border-t border-slate-200/80 p-4">
         <div className="grid h-9 w-9 place-items-center rounded-full bg-navy-900 text-xs font-semibold text-white">{initials}</div>
@@ -73,8 +73,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <button
           onClick={() => {
-            logout()
             navigate('/')
+            void logout()
           }}
           className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
           aria-label="Log out"

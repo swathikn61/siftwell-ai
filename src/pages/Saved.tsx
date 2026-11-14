@@ -10,7 +10,8 @@ import { cn, formatDate, formatINR } from '../lib/format'
 type Tab = 'all' | 'recent' | 'notes'
 
 export default function SavedPage() {
-  const { savedComparisons, deleteComparison, renameComparison, setCompare } = useApp()
+  const { savedComparisons, comparisonsState, deleteComparison, renameComparison, setCompare, reloadUserData, notify } = useApp()
+  const [renaming, setRenaming] = useState(false)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<Tab>('all')
@@ -45,7 +46,7 @@ export default function SavedPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Saved comparisons</h1>
-          <p className="mt-1 text-sm text-slate-500">{savedComparisons.length} saved in this browser · open one to keep researching</p>
+          <p className="mt-1 text-sm text-slate-500">{savedComparisons.length} saved to your account · open one to keep researching</p>
         </div>
         <Link to="/app/search" className="btn-primary"><Search className="h-4 w-4" /> New search</Link>
       </div>
@@ -73,7 +74,11 @@ export default function SavedPage() {
       {error && <div className="mt-6"><ErrorState compact title="Couldn’t load product details" message={errorMessage(error)} onRetry={reload} /></div>}
 
       <div className="mt-6">
-        {list.length === 0 ? (
+        {comparisonsState === 'loading' || comparisonsState === 'idle' ? (
+          <div className="grid gap-4 md:grid-cols-2">{[0, 1].map((i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}</div>
+        ) : comparisonsState === 'error' ? (
+          <ErrorState title="Couldn’t load your saved comparisons" message="Check your connection and try again." onRetry={reloadUserData} />
+        ) : list.length === 0 ? (
           <EmptyState
             icon={Bookmark}
             title={savedComparisons.length ? 'No matches' : 'No saved comparisons'}
@@ -93,15 +98,23 @@ export default function SavedPage() {
                     <div className="min-w-0 flex-1">
                       {editing === c.id ? (
                         <form
-                          onSubmit={(e) => {
+                          onSubmit={async (e) => {
                             e.preventDefault()
-                            if (draft.trim()) renameComparison(c.id, draft.trim())
-                            setEditing(null)
+                            if (!draft.trim() || draft.trim() === c.title) return setEditing(null)
+                            setRenaming(true)
+                            try {
+                              await renameComparison(c.id, draft.trim())
+                              setEditing(null)
+                            } catch (err) {
+                              notify(`Couldn’t rename: ${errorMessage(err)}`)
+                            } finally {
+                              setRenaming(false)
+                            }
                           }}
                           className="flex items-center gap-1.5"
                         >
-                          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} className="input py-1.5" aria-label="Comparison name" />
-                          <button type="submit" className="grid h-8 w-8 place-items-center rounded-lg text-navy-800 hover:bg-slate-100" aria-label="Save name"><Check className="h-4 w-4" /></button>
+                          <input autoFocus onFocus={(e) => e.target.select()} value={draft} onChange={(e) => setDraft(e.target.value)} className="input py-1.5" aria-label="Comparison name" />
+                          <button type="submit" disabled={renaming} className="grid h-8 w-8 place-items-center rounded-lg text-navy-800 hover:bg-slate-100 disabled:opacity-50" aria-label="Save name"><Check className="h-4 w-4" /></button>
                           <button type="button" onClick={() => setEditing(null)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100" aria-label="Cancel"><X className="h-4 w-4" /></button>
                         </form>
                       ) : (

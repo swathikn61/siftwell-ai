@@ -23,7 +23,7 @@ def update_profile(body: ProfileUpdate, user: User = Depends(get_current_user), 
 
 
 @router.post("/password", response_model=TokenResponse, summary="Change my password",
-             responses={401: {"description": "Current password is wrong"}})
+             responses={400: {"description": "Current password is wrong"}})
 def change_password(body: PasswordChange, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> TokenResponse:
     """Other devices are logged out; a new token for this device is returned."""
     return auth_service.change_password(db, user, body)

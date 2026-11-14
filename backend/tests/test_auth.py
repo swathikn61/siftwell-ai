@@ -177,14 +177,18 @@ def test_change_password(client):
 
 
 def test_change_password_requires_current_password(client):
-    res = client.post("/api/users/me/password", headers=auth_headers(client), json={"current_password": "wrong one", "new_password": "a brand new passphrase"})
-    assert res.status_code == 401
+    headers = auth_headers(client)
+    res = client.post("/api/users/me/password", headers=headers, json={"current_password": "wrong one", "new_password": "a brand new passphrase"})
+    # 400, not 401: the session is still valid, so clients must not log the user out
+    assert res.status_code == 400 and res.json()["error"]["code"] == "wrong_password"
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
 
 
 def test_delete_account_removes_user_and_data(client):
     headers = auth_headers(client)
     client.post("/api/me/history", headers=headers, json={"query": "laptop"})
-    assert client.request("DELETE", "/api/users/me", headers=headers, json={"password": "wrong"}).status_code == 401
+    wrong = client.request("DELETE", "/api/users/me", headers=headers, json={"password": "wrong"})
+    assert wrong.status_code == 400 and wrong.json()["error"]["code"] == "wrong_password"
     assert client.request("DELETE", "/api/users/me", headers=headers, json={"password": PASSWORD}).status_code == 204
     assert client.get("/api/auth/me", headers=headers).status_code == 401
     assert client.post("/api/auth/login", json={"email": "alex@example.com", "password": PASSWORD}).status_code == 401

@@ -170,7 +170,7 @@ export function Signup() {
     if (name.trim().length < 2) next.name = 'Enter your full name'
     if (!emailOk(email)) next.email = 'Enter a valid email address'
     if (password.length < 8) next.password = 'Use at least 8 characters'
-    if (!agree) next.agree = 'Please accept the terms to continue'
+    if (!agree) next.agree = 'Please confirm to continue'
     setErrors(next)
     if (Object.keys(next).length) return
     setLoading(true)
@@ -219,7 +219,7 @@ export function Signup() {
         <div>
           <label className="flex items-start gap-2 text-sm text-slate-600">
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-navy-900" />
-            <span>I agree to the <a href="#" className="font-medium text-navy-800 hover:underline">Terms</a> and <a href="#" className="font-medium text-navy-800 hover:underline">Privacy Policy</a>.</span>
+            <span>I understand Siftwell is a preview: product data is fictional demo data, and my account details are stored on this Siftwell server.</span>
           </label>
           {errors.agree && <p className="mt-1.5 text-xs text-red-600">{errors.agree}</p>}
         </div>

@@ -135,7 +135,8 @@ async function request<T>(path: string, options: { params?: Params; signal?: Abo
     }
     if (res.status >= 500 && code === 'http_error') message = 'The server had a problem. Please try again in a moment.'
     // A token was sent but rejected: the session has expired or been revoked
-    if (res.status === 401 && token && !path.startsWith('/api/auth/login')) unauthorizedHandler?.()
+    // (only for code "unauthorized" — e.g. a wrong confirmation password is a 400, not a session problem)
+    if (res.status === 401 && token && code === 'unauthorized' && !path.startsWith('/api/auth/login')) unauthorizedHandler?.()
     throw new ApiError(res.status, code, message, details)
   }
 

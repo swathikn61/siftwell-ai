@@ -8,6 +8,7 @@ import { DEFAULT_WEIGHTS, ScoringPanel } from '../components/ScoringPanel'
 import { DecisionAssistant } from '../components/DecisionAssistant'
 import { EmptyState, ErrorState, ProductCardSkeleton, Skeleton, categoryIcon } from '../components/ui'
 import { useAsync, useBrands, useCategories, useProducts } from '../hooks/useApi'
+import { useApp } from '../context/AppContext'
 import { api, ApiError, errorMessage } from '../lib/api'
 import { cn, formatINR, formatINRShort } from '../lib/format'
 import { basicSearchUrl, parsePrompt, searchUrl } from '../lib/prompt'
@@ -167,6 +168,14 @@ export default function SearchPage() {
     () => (aiResponse && appliedPrefs ? { ...aiResponse, preferences: appliedPrefs } : aiResponse),
     [aiResponse, appliedPrefs],
   )
+
+  // Record the search in the user's history once its filters are known (once per query)
+  const { recordSearch } = useApp()
+  useEffect(() => {
+    if (!q.trim() || waitingForAi) return
+    recordSearch(q, { category: category ?? null, min_price: minPrice ?? null, max_price: maxPrice ?? null, brands })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, waitingForAi])
 
   // Without AI: category and budget words are turned into filters, the rest is sent as keywords
   const keywords = useMemo(() => (aiMode ? [] : parsePrompt(q).keywords), [q, aiMode])
