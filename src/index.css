@@ -1,7 +1,11 @@
 @import "tailwindcss";
+/* Brand files and docs contain no class names: don't scan them */
+@source not "../docs";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Brand wordmark: matches the logo files (Avenir Next on Apple devices, Montserrat elsewhere) */
+  --font-brand: "Avenir Next", "Avenir", "Montserrat", "Helvetica Neue", sans-serif;
 
   --color-navy-50: #f1f4fb;
   --color-navy-100: #e2e8f6;

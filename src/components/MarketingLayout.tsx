@@ -86,7 +86,7 @@ export function Footer() {
     <footer className="border-t border-slate-200 bg-slate-50">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-5">
         <div className="md:col-span-2">
-          <Logo />
+          <Logo tagline />
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-slate-500">
             AI-powered product comparison that helps you choose with confidence — based on your budget, needs and preferences.
           </p>

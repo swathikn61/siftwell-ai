@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, BadgeCheck, CheckCircle2, CircleDashed, FlaskConical, Laptop, Package, RefreshCw, Smartphone,
@@ -8,15 +8,43 @@ import type { VerificationStatus } from '../types/api'
 import { cn } from '../lib/format'
 import { useApp } from '../context/AppContext'
 
-export function Logo({ to = '/', className, light = false }: { to?: string; className?: string; light?: boolean }) {
+/**
+ * The Siftwell mark (from docs/brand/siftwell-mark-*.svg): three rounded strokes forming an
+ * "S" that narrows like a sieve, ending in a gold dot. `variant="dark"` is for dark backgrounds.
+ */
+export function BrandMark({ variant = 'light', className }: { variant?: 'light' | 'dark'; className?: string }) {
+  const id = `sw-gold-${useId().replace(/:/g, '')}`
+  const [top, middle, bottom] = variant === 'dark' ? ['#585663', '#9C998F', '#F5F1E8'] : ['#CFCAC0', '#8C887F', '#14141C']
+  return (
+    <svg viewBox="23 24 74 74" className={className} aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#F3DFA2" />
+          <stop offset=".5" stopColor="#D4AF5A" />
+          <stop offset="1" stopColor="#9E7A2F" />
+        </linearGradient>
+      </defs>
+      <g transform="translate(-4 2)" fill="none" strokeLinecap="round" strokeWidth="11">
+        <path d="M94 34H46a12 12 0 0 0 0 24" stroke={top} />
+        <path d="M46 58H74a12 12 0 0 1 0 24" stroke={middle} />
+        <path d="M74 82H50" stroke={bottom} />
+        <circle cx="36" cy="82" r="7" fill={`url(#${id})`} stroke="none" />
+      </g>
+    </svg>
+  )
+}
+
+/** Mark + SIFTWELL wordmark (+ optional "CHOOSE WELL" tagline), linking home. `light` = for dark backgrounds. */
+export function Logo({ to = '/', className, light = false, tagline = false }: { to?: string; className?: string; light?: boolean; tagline?: boolean }) {
   return (
     <Link to={to} className={cn('group inline-flex items-center gap-2.5', className)} aria-label="Siftwell home">
-      <span className={cn('grid h-8 w-8 place-items-center rounded-lg transition-transform duration-300 group-hover:scale-105', light ? 'bg-white' : 'bg-navy-900')}>
-        <svg viewBox="0 0 32 32" className="h-5 w-5" aria-hidden="true">
-          <path d="M8 10h16M11 16h10M14 22h4" stroke={light ? '#13235b' : '#fff'} strokeWidth="2.6" strokeLinecap="round" fill="none" />
-        </svg>
+      <BrandMark variant={light ? 'dark' : 'light'} className="h-8 w-8 shrink-0 transition-transform duration-300 group-hover:scale-105" />
+      <span className="flex flex-col leading-none">
+        <span className={cn('font-brand text-[15px] font-medium tracking-[0.24em]', light ? 'text-[#F5F1E8]' : 'text-[#14141C]')}>SIFTWELL</span>
+        {tagline && (
+          <span className={cn('font-brand mt-1 text-[8.5px] font-semibold tracking-[0.42em]', light ? 'text-[#D4AF5A]' : 'text-[#A8842F]')}>CHOOSE WELL</span>
+        )}
       </span>
-      <span className={cn('text-[17px] font-semibold tracking-tight', light ? 'text-white' : 'text-slate-900')}>Siftwell</span>
     </Link>
   )
 }

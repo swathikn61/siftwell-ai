@@ -31,7 +31,7 @@ function AuthShell({ title, subtitle, children, footer }: { title: string; subti
         <div aria-hidden className="absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_70%_20%,rgb(52_74_146/0.45),transparent)]" />
         <div aria-hidden className="absolute inset-0 bg-[linear-gradient(to_right,rgb(255_255_255/0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgb(255_255_255/0.04)_1px,transparent_1px)] bg-[size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12">
-          <Logo light />
+          <Logo light tagline />
           <div className="max-w-md">
             <Quote className="h-8 w-8 text-navy-400" />
             <p className="mt-6 text-2xl font-medium leading-snug text-white">
